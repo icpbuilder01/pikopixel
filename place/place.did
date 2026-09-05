@@ -1,0 +1,65 @@
+type TransferFromError = 
+ variant {
+   BadBurn: record {min_burn_amount: nat;};
+   BadFee: record {expected_fee: nat;};
+   CreatedInFuture: record {ledger_time: nat64;};
+   Duplicate: record {duplicate_of: nat;};
+   GenericError: record {
+                   error_code: nat;
+                   message: text;
+                 };
+   InsufficientAllowance: record {allowance: nat;};
+   InsufficientFunds: record {balance: nat;};
+   TemporarilyUnavailable;
+   TooOld;
+ };
+type Time = int;
+type Stats = 
+ record {
+   distinctPainters: nat;
+   gridSize: nat;
+   paletteSize: nat;
+   pixelFeeE8s: nat;
+   totalBurnedPiko: nat;
+   totalPlacements: nat;
+ };
+type RecentPlacement = 
+ record {
+   color: nat8;
+   player: principal;
+   timestamp: Time;
+   x: nat;
+   y: nat;
+ };
+type PlaceResult = 
+ variant {
+   Err: PlaceError;
+   Ok;
+ };
+type PlaceError = 
+ variant {
+   Anonymous;
+   InvalidColor;
+   OutOfBounds;
+   TooSoon: record {retryAfterNanos: nat;};
+   TransferFailed: TransferFromError;
+ };
+type Config = 
+ record {
+   gridSize: nat;
+   paletteSize: nat;
+   pikoLedgerId: principal;
+   pikoLedgerLocked: bool;
+   pixelFeeE8s: nat;
+ };
+service : {
+  getCanvas: () -> (vec nat8) query;
+  getConfig: () -> (Config) query;
+  getRecentPlacements: () -> (vec RecentPlacement) query;
+  getStats: () -> (Stats) query;
+  lockPikoLedgerId: () -> ();
+  placePixel: (x: nat, y: nat, color: nat8) -> (PlaceResult);
+  pruneStalePlaceAttempts: () -> (nat);
+  setPikoLedgerId: (id: principal, mintingAccount: principal) -> ();
+  topUpPlaceFrontend: () -> (record {sent: nat;});
+}

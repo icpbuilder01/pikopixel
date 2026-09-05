@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v1.3.0/docs/schemas/icp-yaml-schema.json
+
+# PikoPlace -- an independent project, deliberately kept separate from
+# piko-icp's own deploy/canister lifecycle. `place` talks to the real
+# PIKO ledger on mainnet by fixed canister id, redirectable to
+# `test-ledger` for local development only (see place/src/main.mo's
+# ledger wiring / scripts/deploy-local.sh).
+canisters:
+  - test-ledger
+  - place
+  - place-frontend
+
+# Ports 8000, 8010, 8020, 8030, 8040, 8050, 8060, 8070 are already used by
+# other local icp-cli projects on this machine; use a distinct port for
+# PikoPlace's local network.
+networks:
+  - name: local
+    mode: managed
+    gateway:
+      port: 8080
