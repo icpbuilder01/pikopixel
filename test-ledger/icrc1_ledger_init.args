@@ -1,0 +1,30 @@
+(variant {
+  Init = record {
+    minting_account = record { owner = principal "yz6zu-pruo6-qm4aj-k5fl5-pxe2d-ej2ew-avucl-usfze-mohit-3pt7n-sae"; subaccount = null };
+    fee_collector_account = null;
+    transfer_fee = 10_000 : nat;
+    decimals = opt (8 : nat8);
+    max_memo_length = opt (32 : nat16);
+    token_symbol = "tPIKO";
+    token_name = "Test PIKO (local only)";
+    metadata = vec {
+      record {
+        "icrc1:description";
+        variant { Text = "Local-only test token for developing PikoRoulette -- not the real PIKO." };
+      };
+    };
+    initial_balances = vec {};
+    feature_flags = opt record { icrc2 = true };
+    archive_options = record {
+      num_blocks_to_archive = 10_000 : nat64;
+      max_transactions_per_response = null;
+      trigger_threshold = 20_000 : nat64;
+      max_message_size_bytes = null;
+      cycles_for_archive_creation = opt (1_000_000_000_000 : nat64);
+      node_max_memory_size_bytes = null;
+      controller_id = principal "yz6zu-pruo6-qm4aj-k5fl5-pxe2d-ej2ew-avucl-usfze-mohit-3pt7n-sae";
+      more_controller_ids = null;
+    };
+    index_principal = null;
+  }
+})
