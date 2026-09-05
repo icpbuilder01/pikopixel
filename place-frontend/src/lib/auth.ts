@@ -11,23 +11,16 @@ const MAX_TTL_NANOSECONDS = BigInt(8 * 60 * 60) * BigInt(1_000_000_000); // 8h
 // produce two different principals for this same site depending purely on
 // which domain happened to be open -- see piko-icp/frontend/src/lib/
 // auth.ts's own comment for the full story (a real user-reported bug on
-// PIKO's mining site, fixed there and proactively here too, before this
-// app has even been deployed). Built from this canister's own id
-// (selfCanisterId) rather than a hardcoded literal, since PikoPlace
-// hasn't been deployed to mainnet yet and there's no real id to hardcode
-// -- see canister-env.ts's own placeholder-avoidance comment for why a
-// guessed id would be worse than not having one. Skipped for local dev.
+// PIKO's mining site, fixed there and proactively here too). Built from
+// this canister's own id (selfCanisterId, auto-resolved via
+// getCanisterEnv per environment) rather than a hardcoded literal.
+// Skipped for local dev. The matching public/.well-known/
+// ii-alternative-origins file (listing this canister's own icp0.io id as
+// a permitted alternative origin) was added in the same mainnet-deploy
+// commit as this comment update.
 function canonicalOrigin(): string {
   return `https://${selfCanisterId}.icp.net`;
 }
-
-// TODO before the real mainnet deploy: this derivationOrigin fix only
-// closes half the loop without its matching public/.well-known/
-// ii-alternative-origins file (see piko-icp/frontend/public/.well-known/
-// for the exact shape) listing this canister's own icp0.io id as
-// permitted -- that file needs the real mainnet id too, so it can't be
-// created yet either. Add it in the same commit that fills in the real
-// mainnet ids in canister-env.ts.
 
 let authClientPromise: Promise<AuthClient> | null = null;
 
