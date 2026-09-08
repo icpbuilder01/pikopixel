@@ -28,10 +28,8 @@ export const ledgerCanisterId = isLocal
   ? canisterEnv["PUBLIC_CANISTER_ID:test-ledger"]
   : REAL_PIKO_LEDGER_CANISTER_ID;
 
-// PikoPlace has not been deployed to mainnet yet (built and verified on
-// the local network only, see ../../scripts/deploy-local.sh). Deliberately
-// no hardcoded mainnet place/place-frontend canister id here -- see
-// PikoPoker's own canister-env.ts history for why: it once shipped with a
-// placeholder id that was never actually its real mainnet id, and that
-// went unnoticed until someone checked. Whoever does the real mainnet
-// deploy must fill in the real ids here deliberately, not copy a guess.
+// PikoPlace is live on mainnet (deployed 2026-09-05). place/place-frontend
+// canister ids are never hardcoded here, unlike REAL_PIKO_LEDGER_CANISTER_ID
+// above -- both come from getCanisterEnv()'s auto-injection instead (see
+// placeCanisterId/selfCanisterId), so there was never a placeholder-id risk
+// here the way PikoPoker's own canister-env.ts history once had.
