@@ -235,7 +235,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
           onClick={handleClick}
           onMouseMove={(e) => setHover(cellFromEvent(e))}
           onMouseLeave={() => setHover(null)}
-          style={{ width: gridSize * CELL_PX, height: gridSize * CELL_PX }}
+          style={{ width: gridSize * CELL_PX }}
         />
       </div>
 
