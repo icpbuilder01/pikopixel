@@ -1412,7 +1412,8 @@ p.pull-quote {
   border-right-color: var(--bevel-hi);
   box-shadow: 3px 3px 0 var(--hard-shadow);
   max-width: 100%;
-  height: auto; /* keep it square once max-width shrinks it on narrow viewports -- without this only the width was constrained, squashing a 600x600 canvas into a non-square rectangle */
+  height: auto; /* only takes effect now that the inline style below no longer sets a fixed height too -- an inline style always wins over an external stylesheet rule */
+  aspect-ratio: 1 / 1; /* belt-and-suspenders: canvas is always gridSize x gridSize, so width alone should always determine a square */
 }
 
 .place-canvas.is-placing {
