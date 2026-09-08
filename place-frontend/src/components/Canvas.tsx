@@ -269,7 +269,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
           <p className="empty-state">Log in to place a pixel.</p>
         ) : !feeApproved ? (
           <button className="button" onClick={handleApprove} disabled={approving}>
-            {approving ? "Approving..." : `Approve ${APPROVE_PLACEMENTS} pixels' worth of PIKO`}
+            {approving ? "Approving..." : "Approve PIKO to start painting"}
           </button>
         ) : (
           <p className="wallet-hint">
