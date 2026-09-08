@@ -28,7 +28,7 @@ export const ledgerCanisterId = isLocal
   ? canisterEnv["PUBLIC_CANISTER_ID:test-ledger"]
   : REAL_PIKO_LEDGER_CANISTER_ID;
 
-// PikoPlace is live on mainnet (deployed 2026-09-05). place/place-frontend
+// PikoPixel is live on mainnet (deployed 2026-09-05). place/place-frontend
 // canister ids are never hardcoded here, unlike REAL_PIKO_LEDGER_CANISTER_ID
 // above -- both come from getCanisterEnv()'s auto-injection instead (see
 // placeCanisterId/selfCanisterId), so there was never a placeholder-id risk

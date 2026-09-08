@@ -1392,7 +1392,7 @@ p.pull-quote {
   border-bottom-color: var(--text-secondary);
 }
 
-/* ---- PikoPlace-specific (pixel canvas, palette) ---- */
+/* ---- PikoPixel-specific (pixel canvas, palette) ---- */
 
 .place-canvas-wrap {
   display: flex;

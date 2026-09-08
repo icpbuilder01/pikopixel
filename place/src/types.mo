@@ -4,7 +4,7 @@ module {
   /// Same minimal ICRC-1/ICRC-2 interface every canister in this project
   /// family declares for its ledger -- duplicated here rather than imported
   /// cross-canister (this project family's existing convention: each
-  /// canister owns its own types.mo). PikoPlace only ever *pulls and
+  /// canister owns its own types.mo). PikoPixel only ever *pulls and
   /// burns*, never pays out, so it needs less of this interface than any
   /// sibling game (no icrc1_transfer, no balance queries).
   public type Account = { owner : Principal; subaccount : ?Blob };

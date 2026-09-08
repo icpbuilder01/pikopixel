@@ -12,7 +12,7 @@ import Runtime "mo:core/Runtime";
 import Timer "mo:core/Timer";
 import Types "types";
 
-// PikoPlace: a collaborative, fully on-chain pixel canvas (r/place-style),
+// PikoPixel: a collaborative, fully on-chain pixel canvas (r/place-style),
 // paid in PIKO. Every placed pixel burns a small, fixed amount of PIKO --
 // pulled from the player (who approves this canister first, same
 // icrc2_transfer_from pattern every sibling game uses to pull a stake)

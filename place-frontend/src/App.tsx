@@ -146,7 +146,7 @@ function App() {
             &#127912;
           </span>
           <div className="brand-text">
-            <span className="brand-name">PikoPlace</span>
+            <span className="brand-name">PikoPixel</span>
             <span className="brand-ticker">
               {stats ? (
                 <>
@@ -194,7 +194,7 @@ function App() {
       )}
       {identity && (
         <p className="wallet-hint">
-          This principal is specific to PikoPlace -- Internet Identity derives a different one per
+          This principal is specific to PikoPixel -- Internet Identity derives a different one per
           site, so PIKO held on the mining/dice/blackjack sites isn't here automatically. Send PIKO to
           the address above (from PikoPay, an exchange, or another wallet) before approving.
         </p>
@@ -373,7 +373,7 @@ function App() {
 
       <footer className="footer">
         <p>
-          PikoPlace is open-source and entirely hosted on the Internet Computer -- no servers, no
+          PikoPixel is open-source and entirely hosted on the Internet Computer -- no servers, no
           database. Same non-affiliation note as the rest of PIKO: an independent, original build.
         </p>
       </footer>
