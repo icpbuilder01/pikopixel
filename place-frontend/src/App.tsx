@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Identity } from "@icp-sdk/core/agent";
-import { getPlaceActor } from "./lib/actors";
+import { Principal } from "@icp-sdk/core/principal";
+import { getPlaceActor, getLedgerActor } from "./lib/actors";
 import { login, logout, getStoredIdentity } from "./lib/auth";
-import { formatPiko, shortPrincipal, timeAgo } from "./lib/format";
+import { formatPiko, parseAmount, shortPrincipal, timeAgo } from "./lib/format";
 import { Canvas } from "./components/Canvas";
 import type { Stats, RecentPlacement } from "./bindings/place/place";
 import "./App.css";
 
-const POLL_MS = 5000;
+const POLL_MS = 2000;
 
 interface PainterEntry {
   player: string;
@@ -30,6 +31,13 @@ function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentPlacement[]>([]);
+  const [balance, setBalance] = useState<bigint | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showSend, setShowSend] = useState(false);
+  const [sendTo, setSendTo] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendStatus, setSendStatus] = useState<string | null>(null);
 
   useEffect(() => {
     getStoredIdentity().then((id) => setIdentity(id));
@@ -53,6 +61,29 @@ function App() {
     return () => clearInterval(id);
   }, [refresh]);
 
+  const refreshBalance = useCallback(async (id: Identity) => {
+    try {
+      const raw = await getLedgerActor(id).icrc1_balance_of({ owner: id.getPrincipal() });
+      setBalance(raw as unknown as bigint);
+    } catch (err) {
+      console.error("Failed to fetch PIKO balance", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (identity) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with the ledger, not derived state
+      refreshBalance(identity);
+    } else {
+      setBalance(null);
+    }
+  }, [identity, refreshBalance]);
+
+  const handlePlaced = useCallback(() => {
+    refresh();
+    if (identity) refreshBalance(identity);
+  }, [refresh, refreshBalance, identity]);
+
   async function handleLogin() {
     const id = await login();
     setIdentity(id);
@@ -61,6 +92,48 @@ function App() {
   async function handleLogout() {
     await logout();
     setIdentity(null);
+  }
+
+  async function handleCopyPrincipal() {
+    if (!identity) return;
+    await navigator.clipboard.writeText(identity.getPrincipal().toText());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function handleSend(e: React.FormEvent) {
+    e.preventDefault();
+    if (!identity) return;
+    const raw = parseAmount(sendAmount);
+    if (raw === null || raw <= 0n) {
+      setSendStatus("Enter a valid amount.");
+      return;
+    }
+    let to: Principal;
+    try {
+      to = Principal.fromText(sendTo.trim());
+    } catch {
+      setSendStatus("That's not a valid principal.");
+      return;
+    }
+    setSending(true);
+    setSendStatus(null);
+    try {
+      const result = await getLedgerActor(identity).icrc1_transfer({ to: { owner: to }, amount: raw });
+      if ("Ok" in result) {
+        setSendStatus(`Sent ${formatPiko(raw)} PIKO.`);
+        setSendTo("");
+        setSendAmount("");
+        refreshBalance(identity);
+      } else {
+        setSendStatus(`Failed: ${JSON.stringify(result.Err)}`);
+      }
+    } catch (err) {
+      console.error("Send failed", err);
+      setSendStatus("Send failed, try again.");
+    } finally {
+      setSending(false);
+    }
   }
 
   const painters = paintersFromRecent(recent);
@@ -88,7 +161,20 @@ function App() {
         <div className="wallet-box">
           {identity ? (
             <>
-              <span className="principal-pill">{shortPrincipal(identity.getPrincipal().toText())}</span>
+              <span className="principal-pill">
+                {shortPrincipal(identity.getPrincipal().toText())}
+                {balance !== null ? ` · ${formatPiko(balance)} PIKO` : ""}
+              </span>
+              <button type="button" className="button secondary small" onClick={handleCopyPrincipal}>
+                {copied ? "Copied" : "Copy"}
+              </button>
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => setShowSend((s) => !s)}
+              >
+                Send out
+              </button>
               <button className="button secondary" onClick={handleLogout}>
                 Log out
               </button>
@@ -100,6 +186,40 @@ function App() {
           )}
         </div>
       </header>
+
+      {identity && (
+        <div className="wallet-address-row">
+          <code className="wallet-address">{identity.getPrincipal().toText()}</code>
+        </div>
+      )}
+      {identity && (
+        <p className="wallet-hint">
+          This principal is specific to PikoPlace -- Internet Identity derives a different one per
+          site, so PIKO held on the mining/dice/blackjack sites isn't here automatically. Send PIKO to
+          the address above (from PikoPay, an exchange, or another wallet) before approving.
+        </p>
+      )}
+      {identity && showSend && (
+        <form className="wallet-send-row" onSubmit={handleSend}>
+          <input
+            className="input"
+            placeholder="Recipient principal"
+            value={sendTo}
+            onChange={(e) => setSendTo(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Amount (PIKO)"
+            value={sendAmount}
+            onChange={(e) => setSendAmount(e.target.value)}
+            inputMode="decimal"
+          />
+          <button type="submit" className="button secondary small" disabled={sending}>
+            {sending ? "Sending..." : "Send"}
+          </button>
+        </form>
+      )}
+      {sendStatus && <p className="wallet-status">{sendStatus}</p>}
 
       <div className="disclaimer">
         <strong>This isn't a bet -- it's a burn.</strong> Every pixel permanently destroys a small
@@ -122,7 +242,7 @@ function App() {
         </p>
       </section>
 
-      <Canvas identity={identity} onPlaced={refresh} />
+      <Canvas identity={identity} onPlaced={handlePlaced} />
 
       <section className="block story-block">
         <h2>
@@ -155,11 +275,17 @@ function App() {
         {stats ? (
           <div className="stat-grid">
             <div className="stat-tile">
-              <div className="stat-label">Pixels placed</div>
+              <div className="stat-label token-label">
+                <img src="/piko-logo.svg" alt="" className="token-icon" />
+                Pixels placed
+              </div>
               <div className="stat-value">{stats.totalPlacements.toString()}</div>
             </div>
             <div className="stat-tile">
-              <div className="stat-label">Distinct painters</div>
+              <div className="stat-label token-label">
+                <img src="/piko-logo.svg" alt="" className="token-icon" />
+                Distinct painters
+              </div>
               <div className="stat-value">{stats.distinctPainters.toString()}</div>
             </div>
             <div className="stat-tile stat-tile-wide">
@@ -181,24 +307,26 @@ function App() {
         </h2>
         <p className="section-intro">Ranked by placements among the most recent activity below.</p>
         {painters.length > 0 ? (
-          <table className="blocks">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Painter</th>
-                <th>Pixels placed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {painters.map((entry, i) => (
-                <tr key={entry.player}>
-                  <td className={i < 3 ? `rank-${i + 1}` : ""}>{i + 1}</td>
-                  <td className="mono">{shortPrincipal(entry.player)}</td>
-                  <td>{entry.placements}</td>
+          <div className="table-scroll">
+            <table className="blocks">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Painter</th>
+                  <th>Pixels placed</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {painters.map((entry, i) => (
+                  <tr key={entry.player}>
+                    <td className={i < 3 ? `rank-${i + 1}` : ""}>{i + 1}</td>
+                    <td className="mono">{shortPrincipal(entry.player)}</td>
+                    <td>{entry.placements}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="empty-state">No one's painted yet -- be the first.</div>
         )}
@@ -216,26 +344,28 @@ function App() {
           )}
         </div>
         {recent.length > 0 ? (
-          <table className="blocks">
-            <thead>
-              <tr>
-                <th>Painter</th>
-                <th>Cell</th>
-                <th>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.map((p, i) => (
-                <tr key={i}>
-                  <td className="mono">{shortPrincipal(p.player.toText())}</td>
-                  <td>
-                    ({p.x.toString()}, {p.y.toString()})
-                  </td>
-                  <td>{timeAgo(p.timestamp)}</td>
+          <div className="table-scroll">
+            <table className="blocks">
+              <thead>
+                <tr>
+                  <th>Painter</th>
+                  <th>Cell</th>
+                  <th>When</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recent.map((p, i) => (
+                  <tr key={i}>
+                    <td className="mono">{shortPrincipal(p.player.toText())}</td>
+                    <td>
+                      ({p.x.toString()}, {p.y.toString()})
+                    </td>
+                    <td>{timeAgo(p.timestamp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="empty-state">No placements yet.</div>
         )}
