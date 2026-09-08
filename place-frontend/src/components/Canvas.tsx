@@ -61,7 +61,10 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [approving, setApproving] = useState(false);
-  const [placing, setPlacing] = useState(false);
+  // A count, not a boolean -- multiple placements can be in flight at once
+  // (see handleClick's own comment), so no single call "owns" the pending
+  // state.
+  const [pendingCount, setPendingCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -185,12 +188,21 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
     return previous;
   }
 
+  // Deliberately doesn't wait for a prior placePixel call to resolve before
+  // allowing another -- an IC update call round trip is 1-3s, and gating
+  // clicks on that would make the whole point of the optimistic paint above
+  // moot (the cell already looks placed instantly; blocking further clicks
+  // until the *network* catches up would just move the wait somewhere the
+  // user still feels it). Each call carries its own `previous` value, so
+  // several in-flight placements -- even overlapping ones -- each revert
+  // correctly on their own if they fail; the backend's own per-caller
+  // cooldown is what actually rate-limits real submissions.
   async function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!identity || placing) return;
+    if (!identity) return;
     const cell = cellFromEvent(e);
     if (!cell) return;
     setMessage(null);
-    setPlacing(true);
+    setPendingCount((n) => n + 1);
     const previous = paintLocal(cell.x, cell.y, colorIndex);
     try {
       const result = await getPlaceActor(identity).placePixel(BigInt(cell.x), BigInt(cell.y), colorIndex);
@@ -206,7 +218,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
       if (previous !== null) paintLocal(cell.x, cell.y, previous);
       setMessage("Placement failed, nothing was charged if this was a network error.");
     } finally {
-      setPlacing(false);
+      setPendingCount((n) => n - 1);
     }
   }
 
@@ -231,7 +243,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
           ref={canvasRef}
           width={gridSize}
           height={gridSize}
-          className={`place-canvas ${placing ? "is-placing" : ""}`}
+          className={`place-canvas ${pendingCount > 0 ? "is-placing" : ""}`}
           onClick={handleClick}
           onMouseMove={(e) => setHover(cellFromEvent(e))}
           onMouseLeave={() => setHover(null)}
