@@ -187,18 +187,6 @@ function App() {
         </div>
       </header>
 
-      {identity && (
-        <div className="wallet-address-row">
-          <code className="wallet-address">{identity.getPrincipal().toText()}</code>
-        </div>
-      )}
-      {identity && (
-        <p className="wallet-hint">
-          This principal is specific to PikoPixel -- Internet Identity derives a different one per
-          site, so PIKO held on the mining/dice/blackjack sites isn't here automatically. Send PIKO to
-          the address above (from PikoPay, an exchange, or another wallet) before approving.
-        </p>
-      )}
       {identity && showSend && (
         <form className="wallet-send-row" onSubmit={handleSend}>
           <input
