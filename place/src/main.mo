@@ -136,6 +136,21 @@ actor self {
 
   public query func getRecentPlacements() : async [Types.RecentPlacement] { recentPlacements };
 
+  // Controller-only: wipes the canvas back to blank and zeroes every stat/
+  // leaderboard/recent-activity record. Doesn't touch pikoLedgerId or its
+  // lock, and doesn't undo anything -- PIKO already burned through
+  // placePixel already left circulating supply for good and stays on the
+  // ledger's own immutable history regardless of what this canister's own
+  // scoreboard shows afterward. For resetting the display, not the money.
+  public shared ({ caller }) func resetCanvas() : async () {
+    requireController(caller);
+    grid := VarArray.repeat<Nat8>(0, GRID_SIZE * GRID_SIZE);
+    totalPlacements := 0;
+    totalBurnedPiko := 0;
+    Map.clear(painterPlacements);
+    recentPlacements := [];
+  };
+
   // Pulls the fixed pixel fee straight from the player to the ledger's
   // own minting account -- a real ICRC-1 burn, atomic with the pull
   // itself (the ledger either moves it there or the whole call fails; it
