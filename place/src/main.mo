@@ -35,7 +35,7 @@ actor self {
   // Purely a display concern -- see place-frontend's own palette for the
   // actual 18 colors. This canister only ever stores/validates an index.
   transient let PALETTE_SIZE : Nat8 = 18;
-  transient let PIXEL_FEE_E8S : Nat = 100_000_000; // 1 PIKO, burned per placement
+  transient let PIXEL_FEE_E8S : Nat = 200_000_000; // 2 PIKO, burned per placement
 
   // 0 = the palette's first color (white). Flat row-major array, index =
   // y * GRID_SIZE + x -- 10,000 bytes, trivially cheap to store and to
