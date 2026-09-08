@@ -13,15 +13,17 @@ interface CanvasProps {
 
 // A classic r/place-flavored 16-color palette. Purely a display concern --
 // the backend only ever stores/validates the index (0-15), see
-// place/src/main.mo's own PALETTE_SIZE comment.
+// place/src/main.mo's own PALETTE_SIZE comment. #be0039 (dark red) replaces
+// the old #ffa800 orange slot, which sat too close to neighboring
+// orange-red/yellow and left the palette without a true red.
 const PALETTE = [
   "#ffffff", "#d4d7d9", "#898d90", "#000000",
-  "#ff4500", "#ffa800", "#ffd635", "#00a368",
+  "#be0039", "#ff4500", "#ffd635", "#00a368",
   "#7eed56", "#2450a4", "#3690ea", "#51e9f4",
   "#811e9f", "#b44ac0", "#ff99aa", "#6d482f",
 ];
 
-const POLL_MS = 3000;
+const POLL_MS = 1000; // fast poll for other painters' placements, kept snappy alongside the optimistic local paint below
 const CELL_PX = 6; // display size per cell at 1x -- scaled up via CSS below
 const APPROVE_PLACEMENTS = 50; // how many pixels' worth of allowance to approve at once
 const PIKO_LEDGER_FEE_E8S = 10_000n; // same gotcha as every sibling game's own approve flow
@@ -56,11 +58,9 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
   const [colorIndex, setColorIndex] = useState(0);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [allowance, setAllowance] = useState<bigint | null>(null);
-  const [balance, setBalance] = useState<bigint | null>(null);
   const [approving, setApproving] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     getPlaceActor()
@@ -97,33 +97,14 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
     }
   }, []);
 
-  const refreshBalance = useCallback(async (id: Identity) => {
-    try {
-      const raw = await getLedgerActor(id).icrc1_balance_of({ owner: id.getPrincipal() });
-      setBalance(raw as unknown as bigint);
-    } catch (err) {
-      console.error("Failed to fetch place balance", err);
-    }
-  }, []);
-
   useEffect(() => {
     if (identity) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with the ledger, not derived state
       refreshAllowance(identity);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with the ledger, not derived state
-      refreshBalance(identity);
     } else {
       setAllowance(null);
-      setBalance(null);
     }
-  }, [identity, refreshAllowance, refreshBalance]);
-
-  async function handleCopyPrincipal() {
-    if (!identity) return;
-    await navigator.clipboard.writeText(identity.getPrincipal().toText());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
+  }, [identity, refreshAllowance]);
 
   const gridSize = config ? Number(config.gridSize) : 100;
 
@@ -187,24 +168,40 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
     }
   }
 
+  // Paints a cell in the local grid immediately, without waiting on a
+  // network round trip -- returns the cell's previous value so a failed
+  // placement can be rolled back to it.
+  function paintLocal(x: number, y: number, idx: number): number | null {
+    let previous: number | null = null;
+    setGrid((prev) => {
+      if (!prev) return prev;
+      previous = prev[y * gridSize + x] ?? 0;
+      const next = new Uint8Array(prev);
+      next[y * gridSize + x] = idx;
+      return next;
+    });
+    return previous;
+  }
+
   async function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!identity || placing) return;
     const cell = cellFromEvent(e);
     if (!cell) return;
     setMessage(null);
     setPlacing(true);
+    const previous = paintLocal(cell.x, cell.y, colorIndex);
     try {
       const result = await getPlaceActor(identity).placePixel(BigInt(cell.x), BigInt(cell.y), colorIndex);
       if (result.__kind__ === "Ok") {
         refreshAllowance(identity);
-        refreshBalance(identity);
-        refreshCanvas();
         onPlaced();
       } else {
+        if (previous !== null) paintLocal(cell.x, cell.y, previous);
         setMessage(placeErrorMessage(result.Err));
       }
     } catch (err) {
       console.error("placePixel failed", err);
+      if (previous !== null) paintLocal(cell.x, cell.y, previous);
       setMessage("Placement failed, nothing was charged if this was a network error.");
     } finally {
       setPlacing(false);
@@ -253,24 +250,6 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
             />
           ))}
         </div>
-
-        {identity && (
-          <div className="wallet-address-row">
-            <code className="wallet-address">
-              {formatPiko(balance ?? 0n)} PIKO -- {identity.getPrincipal().toText()}
-            </code>
-            <button type="button" className="button secondary small" onClick={handleCopyPrincipal}>
-              {copied ? "Copied" : "Copy principal"}
-            </button>
-          </div>
-        )}
-        {identity && balance !== null && balance < pixelFee + PIKO_LEDGER_FEE_E8S && (
-          <p className="wallet-hint">
-            That's a different principal than any other PIKO site you've used -- Internet Identity
-            derives one per site. Send PIKO here (from PikoPay, an exchange, or another wallet) before
-            approving.
-          </p>
-        )}
 
         {!identity ? (
           <p className="empty-state">Log in to place a pixel.</p>
