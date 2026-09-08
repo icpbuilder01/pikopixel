@@ -90,7 +90,7 @@ actor self {
   // without it, a caller with no PIKO/allowance can call placePixel in a
   // tight loop and force a real icrc2_transfer_from attempt for free,
   // even though it will always fail.
-  transient let MIN_PLACE_INTERVAL_NANOS : Int = 300_000_000; // 0.3s
+  transient let MIN_PLACE_INTERVAL_NANOS : Int = 100_000_000; // 0.1s
   transient let lastPlaceAttempt : Map.Map<Principal, Time.Time> = Map.empty<Principal, Time.Time>();
 
   // ---- Stats (persisted, purely informational) ----
