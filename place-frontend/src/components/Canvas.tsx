@@ -56,9 +56,11 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
   const [colorIndex, setColorIndex] = useState(0);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [allowance, setAllowance] = useState<bigint | null>(null);
+  const [balance, setBalance] = useState<bigint | null>(null);
   const [approving, setApproving] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     getPlaceActor()
@@ -95,14 +97,33 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
     }
   }, []);
 
+  const refreshBalance = useCallback(async (id: Identity) => {
+    try {
+      const raw = await getLedgerActor(id).icrc1_balance_of({ owner: id.getPrincipal() });
+      setBalance(raw as unknown as bigint);
+    } catch (err) {
+      console.error("Failed to fetch place balance", err);
+    }
+  }, []);
+
   useEffect(() => {
     if (identity) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with the ledger, not derived state
       refreshAllowance(identity);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with the ledger, not derived state
+      refreshBalance(identity);
     } else {
       setAllowance(null);
+      setBalance(null);
     }
-  }, [identity, refreshAllowance]);
+  }, [identity, refreshAllowance, refreshBalance]);
+
+  async function handleCopyPrincipal() {
+    if (!identity) return;
+    await navigator.clipboard.writeText(identity.getPrincipal().toText());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
 
   const gridSize = config ? Number(config.gridSize) : 100;
 
@@ -176,6 +197,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
       const result = await getPlaceActor(identity).placePixel(BigInt(cell.x), BigInt(cell.y), colorIndex);
       if (result.__kind__ === "Ok") {
         refreshAllowance(identity);
+        refreshBalance(identity);
         refreshCanvas();
         onPlaced();
       } else {
@@ -231,6 +253,24 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
             />
           ))}
         </div>
+
+        {identity && (
+          <div className="wallet-address-row">
+            <code className="wallet-address">
+              {formatPiko(balance ?? 0n)} PIKO -- {identity.getPrincipal().toText()}
+            </code>
+            <button type="button" className="button secondary small" onClick={handleCopyPrincipal}>
+              {copied ? "Copied" : "Copy principal"}
+            </button>
+          </div>
+        )}
+        {identity && balance !== null && balance < pixelFee + PIKO_LEDGER_FEE_E8S && (
+          <p className="wallet-hint">
+            That's a different principal than any other PIKO site you've used -- Internet Identity
+            derives one per site. Send PIKO here (from PikoPay, an exchange, or another wallet) before
+            approving.
+          </p>
+        )}
 
         {!identity ? (
           <p className="empty-state">Log in to place a pixel.</p>
