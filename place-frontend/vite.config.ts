@@ -25,7 +25,7 @@ export default defineConfig(({ command }) => {
   }
 
   // Local dev server: look up the local network's root key and this
-  // project's own canister ids. No sibling `frontend` lookup -- PikoPlace
+  // project's own canister ids. No sibling `frontend` lookup -- PikoPixel
   // is a separate project on purpose (see ../icp.yaml).
   const environment = process.env.ICP_ENVIRONMENT || "local";
   const CANISTER_NAMES = ["place", "test-ledger"];
