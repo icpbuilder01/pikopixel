@@ -271,14 +271,14 @@ function App() {
             </div>
             <div className="stat-tile">
               <div className="stat-label token-label">
-                <img src="/piko-logo.svg" alt="" className="token-icon" />
+                <span aria-hidden="true">🖌️</span>
                 Distinct painters
               </div>
               <div className="stat-value">{stats.distinctPainters.toString()}</div>
             </div>
             <div className="stat-tile stat-tile-wide">
               <div className="stat-label token-label">
-                <img src="/piko-logo.svg" alt="" className="token-icon" />
+                <span aria-hidden="true">🔥</span>
                 PIKO burned, total
               </div>
               <div className="stat-value">{formatPiko(stats.totalBurnedPiko)}</div>
