@@ -67,6 +67,14 @@ module {
     timestamp : Time.Time;
   };
 
+  // A painter's true lifetime placement count -- distinct from
+  // RecentPlacement, which is only the last MAX_RECENT activity feed
+  // entries and was never meant to double as a leaderboard source.
+  public type TopPainter = {
+    player : Principal;
+    placements : Nat;
+  };
+
   public type Stats = {
     totalPlacements : Nat;
     totalBurnedPiko : Nat;

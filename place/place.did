@@ -13,6 +13,11 @@ type TransferFromError =
    TemporarilyUnavailable;
    TooOld;
  };
+type TopPainter = 
+ record {
+   placements: nat;
+   player: principal;
+ };
 type Time = int;
 type Stats = 
  record {
@@ -57,9 +62,11 @@ service : {
   getConfig: () -> (Config) query;
   getRecentPlacements: () -> (vec RecentPlacement) query;
   getStats: () -> (Stats) query;
+  getTopPainters: (limit: nat) -> (vec TopPainter) query;
   lockPikoLedgerId: () -> ();
   placePixel: (x: nat, y: nat, color: nat8) -> (PlaceResult);
   pruneStalePlaceAttempts: () -> (nat);
+  resetCanvas: () -> ();
   setPikoLedgerId: (id: principal, mintingAccount: principal) -> ();
   topUpPlaceFrontend: () -> (record {sent: nat;});
 }
