@@ -136,6 +136,19 @@ actor self {
 
   public query func getRecentPlacements() : async [Types.RecentPlacement] { recentPlacements };
 
+  // True lifetime leaderboard, read from painterPlacements itself rather
+  // than derived from getRecentPlacements() -- that feed is capped at
+  // MAX_RECENT (30) entries *total, across every painter*, so deriving a
+  // leaderboard from it silently caps anyone's displayed count at 30 too
+  // (worse the more other people are also painting, since they crowd out
+  // your own entries in that shared window).
+  public query func getTopPainters(limit : Nat) : async [Types.TopPainter] {
+    let entries = Iter.toArray(Map.entries(painterPlacements));
+    let sorted = Array.sort<(Principal, Nat)>(entries, func((_, a), (_, b)) { Nat.compare(b, a) });
+    let capped = if (sorted.size() > limit) { limit } else { sorted.size() };
+    Array.tabulate<Types.TopPainter>(capped, func(i) { let (p, n) = sorted[i]; { player = p; placements = n } });
+  };
+
   // Controller-only: wipes the canvas back to blank and zeroes every stat/
   // leaderboard/recent-activity record. Doesn't touch pikoLedgerId or its
   // lock, and doesn't undo anything -- PIKO already burned through
