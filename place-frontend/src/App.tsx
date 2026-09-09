@@ -5,32 +5,17 @@ import { getPlaceActor, getLedgerActor } from "./lib/actors";
 import { login, logout, getStoredIdentity } from "./lib/auth";
 import { formatPiko, parseAmount, shortPrincipal, timeAgo } from "./lib/format";
 import { Canvas } from "./components/Canvas";
-import type { Stats, RecentPlacement } from "./bindings/place/place";
+import type { Stats, RecentPlacement, TopPainter } from "./bindings/place/place";
 import "./App.css";
 
 const POLL_MS = 2000;
-
-interface PainterEntry {
-  player: string;
-  placements: number;
-}
-
-function paintersFromRecent(recent: RecentPlacement[]): PainterEntry[] {
-  const counts = new Map<string, number>();
-  for (const p of recent) {
-    const key = p.player.toText();
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return Array.from(counts.entries())
-    .map(([player, placements]) => ({ player, placements }))
-    .sort((a, b) => b.placements - a.placements)
-    .slice(0, 10);
-}
+const TOP_PAINTERS_LIMIT = 10;
 
 function App() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentPlacement[]>([]);
+  const [painters, setPainters] = useState<TopPainter[]>([]);
   const [balance, setBalance] = useState<bigint | null>(null);
   const [copied, setCopied] = useState(false);
   const [showSend, setShowSend] = useState(false);
@@ -46,9 +31,14 @@ function App() {
   const refresh = useCallback(async () => {
     try {
       const place = getPlaceActor();
-      const [s, r] = await Promise.all([place.getStats(), place.getRecentPlacements()]);
+      const [s, r, p] = await Promise.all([
+        place.getStats(),
+        place.getRecentPlacements(),
+        place.getTopPainters(BigInt(TOP_PAINTERS_LIMIT)),
+      ]);
       setStats(s);
       setRecent(r.slice().reverse());
+      setPainters(p);
     } catch (err) {
       console.error("Failed to refresh place stats", err);
     }
@@ -135,8 +125,6 @@ function App() {
       setSending(false);
     }
   }
-
-  const painters = paintersFromRecent(recent);
 
   return (
     <main className="page">
@@ -291,7 +279,7 @@ function App() {
         <h2>
           Top painters <span className="section-icon">🏆</span>
         </h2>
-        <p className="section-intro">Ranked by placements among the most recent activity below.</p>
+        <p className="section-intro">Ranked by total pixels placed, all-time.</p>
         {painters.length > 0 ? (
           <div className="table-scroll">
             <table className="blocks">
@@ -304,10 +292,10 @@ function App() {
               </thead>
               <tbody>
                 {painters.map((entry, i) => (
-                  <tr key={entry.player}>
+                  <tr key={entry.player.toText()}>
                     <td className={i < 3 ? `rank-${i + 1}` : ""}>{i + 1}</td>
-                    <td className="mono">{shortPrincipal(entry.player)}</td>
-                    <td>{entry.placements}</td>
+                    <td className="mono">{shortPrincipal(entry.player.toText())}</td>
+                    <td>{entry.placements.toString()}</td>
                   </tr>
                 ))}
               </tbody>
