@@ -91,4 +91,51 @@ module {
     gridSize : Nat;
     paletteSize : Nat;
   };
+
+  // ---- Sponsored text slots (added 2026-10-07) ----
+
+  /// One rented ad slot. Text-only on purpose (no images, no HTML): the
+  /// app and the mining site render `text`/`link` as plain text, never as
+  /// markup, and the native app never makes `link` clickable.
+  public type Ad = {
+    slot : Nat;
+    text : Text;
+    link : ?Text;
+    advertiser : Principal;
+    rentedAt : Time.Time;
+    expiresAt : Time.Time;
+    burnedE8s : Nat; // total PIKO burned for this ad so far, extensions included
+  };
+
+  public type AdSlot = {
+    slot : Nat;
+    ad : ?Ad; // null = free (never rented, or the last ad expired)
+  };
+
+  public type AdMarket = {
+    slots : [AdSlot];
+    pricePerDayE8s : Nat; // what a rental starting right now costs, per day
+    floorPricePerDayE8s : Nat;
+    maxDays : Nat;
+    maxTextChars : Nat;
+    maxLinkChars : Nat;
+    totalAdRentals : Nat;
+    totalAdBurnedE8s : Nat;
+  };
+
+  public type RentAdError = {
+    #Anonymous;
+    #TooSoon : { retryAfterNanos : Nat };
+    #InvalidSlot;
+    #SlotTaken : { expiresAt : Time.Time };
+    #SlotBusy; // another rental of this same slot is mid-flight
+    #InvalidText;
+    #InvalidLink;
+    #InvalidDuration;
+    #ExtensionTooLong; // would put the ad more than maxDays past now
+    #PriceAboveMax : { pricePerDayE8s : Nat };
+    #TransferFailed : TransferFromError;
+  };
+
+  public type RentAdResult = { #Ok : Ad; #Err : RentAdError };
 }

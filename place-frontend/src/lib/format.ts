@@ -41,3 +41,12 @@ export function timeAgo(nanoseconds: bigint): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   return `${Math.floor(diffHours / 24)}d ago`;
 }
+
+export function timeUntil(nanoseconds: bigint): string {
+  const ms = Number(nanoseconds / 1_000_000n);
+  const diffMinutes = Math.max(0, Math.floor((ms - Date.now()) / 60_000));
+  if (diffMinutes < 60) return `${diffMinutes}m`;
+  const hours = Math.floor(diffMinutes / 60);
+  if (hours < 24) return `${hours}h ${diffMinutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
