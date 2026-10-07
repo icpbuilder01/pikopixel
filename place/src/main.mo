@@ -238,8 +238,8 @@ actor self {
   // Ads are bought in PIKO *blocks*, not days (suggested by a community
   // member, 2026-10-07): when nobody mines, nobody is looking at the mining
   // apps either, so the ad simply stays up until enough blocks have gone
-  // by. A hard AD_MAX_LIFETIME cap still ends it if the chain ever stops
-  // for good, so no slot can be held forever. Each slot runs one ad and
+  // by. A hard time cap, scaled to the blocks paid for, still ends it if
+  // the chain ever stops for good, so no slot can be held forever. Each slot runs one ad and
   // queues up to AD_MAX_QUEUE more, each starting where the previous ends.
   //
   // mother (PIKO's mining canister) lives on another subnet, so queries
@@ -268,11 +268,14 @@ actor self {
   transient let AD_PRICE_STEP_UP_PCT : Nat = 120; // x1.2 after each rental
   transient let AD_PRICE_DECAY_PCT : Nat = 90; // x0.9 per full day without one
   transient let AD_MIN_BLOCKS : Nat = 1;
-  // Kept well under what AD_MAX_LIFETIME_DAYS covers at the slow block
-  // rates PIKO has really seen, so the hard cap rarely cuts a paid ad short.
   transient let AD_MAX_BLOCKS : Nat = 288;
   transient let AD_MAX_QUEUE : Nat = 3;
-  transient let AD_MAX_LIFETIME_DAYS : Nat = 60;
+  // The hard stop scales with what was paid for: 12h per block (i.e. the
+  // chain averaging under 2 blocks/day for the whole ad, slower than
+  // anything seen outside a full stop), never less than 7 days -- so a
+  // long ad isn't cut halfway just because mining was slow.
+  transient let AD_LIFETIME_NANOS_PER_BLOCK : Nat = 12 * 3_600_000_000_000;
+  transient let AD_MIN_LIFETIME_DAYS : Nat = 7;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
   transient let AD_IMAGE_WIDTH : Nat = 64;
@@ -369,11 +372,13 @@ actor self {
     true;
   };
 
-  func adLifetimeNanos() : Nat { AD_MAX_LIFETIME_DAYS * DAY_NANOS };
+  func adLifetimeNanos(blocks : Nat) : Nat {
+    Nat.max(AD_MIN_LIFETIME_DAYS * DAY_NANOS, blocks * AD_LIFETIME_NANOS_PER_BLOCK);
+  };
 
   func entryFinished(e : Types.AdEntry, height : Nat, now : Time.Time) : Bool {
     switch (e.startHeight, e.startedAt) {
-      case (?sh, ?st) { height >= sh + e.blocks or now >= st + adLifetimeNanos() };
+      case (?sh, ?st) { height >= sh + e.blocks or now >= st + adLifetimeNanos(e.blocks) };
       case _ { false };
     };
   };
@@ -396,7 +401,7 @@ actor self {
         case null { e.blocks };
       };
       startHeight = e.startHeight;
-      deadline = switch (e.startedAt) { case (?st) { ?(st + adLifetimeNanos()) }; case null { null } };
+      deadline = switch (e.startedAt) { case (?st) { ?(st + adLifetimeNanos(e.blocks)) }; case null { null } };
       burnedE8s = e.burnedE8s;
       reports = e.reporters.size();
       suspicious;
@@ -465,7 +470,8 @@ actor self {
       minBlocks = AD_MIN_BLOCKS;
       maxBlocks = AD_MAX_BLOCKS;
       maxQueue = AD_MAX_QUEUE;
-      maxLifetimeDays = AD_MAX_LIFETIME_DAYS;
+      minLifetimeDays = AD_MIN_LIFETIME_DAYS;
+      lifetimeHoursPerBlock = AD_LIFETIME_NANOS_PER_BLOCK / 3_600_000_000_000;
       maxTextChars = AD_MAX_TEXT_CHARS;
       maxLinkChars = AD_MAX_LINK_CHARS;
       imageWidth = AD_IMAGE_WIDTH;
