@@ -25,8 +25,26 @@ type Stats =
    gridSize: nat;
    paletteSize: nat;
    pixelFeeE8s: nat;
+   totalAdBurnedE8s: nat;
    totalBurnedPiko: nat;
    totalPlacements: nat;
+ };
+type ReportAdResult = 
+ variant {
+   Err: ReportAdError;
+   Ok: record {
+         reports: nat;
+         suspicious: bool;
+       };
+ };
+type ReportAdError = 
+ variant {
+   AlreadyReported;
+   Anonymous;
+   InvalidSlot;
+   NoActiveAd;
+   NotAPainter;
+   OwnAd;
  };
 type RentAdResult = 
  variant {
@@ -79,6 +97,7 @@ type Config =
 type AdSlot = 
  record {
    ad: opt Ad;
+   reportedByMe: bool;
    slot: nat;
  };
 type AdMarket = 
@@ -89,6 +108,7 @@ type AdMarket =
    maxTextChars: nat;
    pricePerDayE8s: nat;
    slots: vec AdSlot;
+   suspiciousAfterReports: nat;
    totalAdBurnedE8s: nat;
    totalAdRentals: nat;
  };
@@ -99,7 +119,9 @@ type Ad =
    expiresAt: Time;
    link: opt text;
    rentedAt: Time;
+   reports: nat;
    slot: nat;
+   suspicious: bool;
    "text": text;
  };
 service : {
@@ -115,6 +137,7 @@ service : {
   pruneStalePlaceAttempts: () -> (nat);
   rentAdSlot: (slot: nat, "text": text, link: opt text, days: nat,
    maxPricePerDayE8s: nat) -> (RentAdResult);
+  reportAd: (slot: nat) -> (ReportAdResult);
   resetCanvas: () -> ();
   setPikoLedgerId: (id: principal, mintingAccount: principal) -> ();
   topUpPlaceFrontend: () -> (record {sent: nat;});

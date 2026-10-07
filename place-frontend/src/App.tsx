@@ -272,7 +272,10 @@ function App() {
                 <img src="/piko-logo.svg" alt="" className="token-icon" />
                 PIKO burned, total
               </div>
-              <div className="stat-value">{formatPiko(stats.totalBurnedPiko)}</div>
+              <div className="stat-value">{formatPiko(stats.totalBurnedPiko + stats.totalAdBurnedE8s)}</div>
+              <div className="stat-breakdown mono">
+                {formatPiko(stats.totalBurnedPiko)} by pixels · {formatPiko(stats.totalAdBurnedE8s)} by ads
+              </div>
             </div>
           </div>
         ) : (
