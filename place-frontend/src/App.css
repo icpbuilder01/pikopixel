@@ -1634,3 +1634,14 @@ p.pull-quote {
   color: var(--text-secondary);
   font-size: 0.82rem;
 }
+
+.board-import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.board-import .button {
+  cursor: pointer;
+}

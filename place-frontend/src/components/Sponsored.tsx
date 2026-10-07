@@ -5,6 +5,7 @@ import { getPlaceActor, getLedgerActor } from "../lib/actors";
 import { placeCanisterId } from "../lib/canister-env";
 import { formatPiko, shortPrincipal } from "../lib/format";
 import { PALETTE } from "../lib/palette";
+import { pixelateImageFile } from "../lib/pixelate";
 import { ReportAdError, type Ad, type AdMarket, type RentAdError } from "../bindings/place/place";
 
 // Shown next to every ad, everywhere ads appear (this site, the browser
@@ -15,9 +16,8 @@ export const SUSPICIOUS_WARNING = "⚠ Reported as suspicious by several players
 const POLL_MS = 10_000;
 const ROTATE_MS = 8_000;
 const PIKO_LEDGER_FEE_E8S = 10_000n; // same gotcha as Canvas.tsx's approve flow
-const IMAGE_WIDTH = 32; // must match AD_IMAGE_WIDTH/HEIGHT in place/src/main.mo
-const IMAGE_HEIGHT = 16;
-const BLOCK_STEP = 12; // the duration slider moves in ~1h steps at the 5-min target
+const IMAGE_WIDTH = 64; // must match AD_IMAGE_WIDTH/HEIGHT in place/src/main.mo
+const IMAGE_HEIGHT = 32;
 
 const placePrincipal = Principal.fromText(placeCanisterId);
 
@@ -84,7 +84,7 @@ function reportErrorMessage(err: ReportAdError): string {
 }
 
 /** Renders a 32x16 palette-index image, scaled up with crisp pixels. */
-export function AdImage({ image, scale = 4 }: { image: Uint8Array; scale?: number }) {
+export function AdImage({ image, scale = 2 }: { image: Uint8Array; scale?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const ctx = ref.current?.getContext("2d");
@@ -114,8 +114,23 @@ function ImageEditor({
   onChange: React.Dispatch<React.SetStateAction<Uint8Array>>;
 }) {
   const [color, setColor] = useState(3);
+  const [dither, setDither] = useState(true);
+  const [importError, setImportError] = useState<string | null>(null);
   const painting = useRef(false);
-  const scale = 12;
+  const scale = 10;
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportError(null);
+    try {
+      onChange(await pixelateImageFile(file, IMAGE_WIDTH, IMAGE_HEIGHT, dither));
+    } catch (err) {
+      console.error("Image import failed", err);
+      setImportError("Couldn't read that image -- try a PNG or JPEG.");
+    }
+  }
 
   function paintAt(e: React.PointerEvent<HTMLDivElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -135,6 +150,21 @@ function ImageEditor({
 
   return (
     <div className="board-editor">
+      <div className="board-import">
+        <label className="button secondary small">
+          Import an image
+          <input type="file" accept="image/*" onChange={handleImport} hidden />
+        </label>
+        <label className="board-toggle">
+          <input type="checkbox" checked={dither} onChange={(e) => setDither(e.target.checked)} /> Smooth colors
+          (best for photos)
+        </label>
+      </div>
+      <p className="wallet-hint">
+        Turned into {IMAGE_WIDTH}x{IMAGE_HEIGHT} pixel art right here in your browser, nothing is uploaded. Then
+        touch it up by clicking or dragging.
+      </p>
+      {importError && <p className="mining-message critical">{importError}</p>}
       <div
         className="board-editor-surface"
         style={{ width: IMAGE_WIDTH * scale, maxWidth: "100%", aspectRatio: `${IMAGE_WIDTH} / ${IMAGE_HEIGHT}` }}
@@ -201,7 +231,7 @@ export function SponsoredBanner() {
     <aside className="board-strip" aria-label="Community board">
       <span className="board-strip-label">{AD_DISCLAIMER}</span>
       {ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
-      {ad.image && <AdImage image={ad.image} scale={3} />}
+      {ad.image && <AdImage image={ad.image} />}
       <span className="board-strip-text">{ad.text}</span>
       {ad.link && (
         <a className="board-strip-link mono" href={ad.link} target="_blank" rel="noopener noreferrer nofollow">
@@ -224,7 +254,7 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
   const [link, setLink] = useState("");
   const [withImage, setWithImage] = useState(false);
   const [image, setImage] = useState(() => new Uint8Array(IMAGE_WIDTH * IMAGE_HEIGHT));
-  const [blocks, setBlocks] = useState(288);
+  const [blocks, setBlocks] = useState(24);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "good" | "critical"; text: string } | null>(null);
 
@@ -401,7 +431,7 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
                 {ad ? (
                   <>
                     {ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
-                    {ad.image && <AdImage image={ad.image} scale={3} />}
+                    {ad.image && <AdImage image={ad.image} />}
                     {ad.imageHidden && <span className="board-cell-meta">(image hidden after reports)</span>}
                     <span className="board-cell-text">{ad.text}</span>
                     {ad.link && <span className="board-cell-link mono">{ad.link}</span>}
@@ -461,15 +491,15 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
           </label>
           {withImage && <ImageEditor value={image} onChange={setImage} />}
           <label className="stat-label" htmlFor="board-blocks">
-            Duration: {blocks} blocks ({blocksToDuration(blocks, market.targetBlockSeconds)} of mining at the{" "}
-            {Number(market.targetBlockSeconds) / 60}-min target)
+            Duration: {blocks} block{blocks > 1 ? "s" : ""} ({blocksToDuration(blocks, market.targetBlockSeconds)} at the{" "}
+            {Number(market.targetBlockSeconds) / 60}-min target, longer while few people mine)
           </label>
           <input
             id="board-blocks"
             type="range"
             min={minBlocks}
             max={maxBlocks}
-            step={BLOCK_STEP}
+            step={1}
             value={blocks}
             onChange={(e) => setBlocks(Number(e.target.value))}
           />
