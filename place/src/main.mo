@@ -270,12 +270,10 @@ actor self {
   transient let AD_MIN_BLOCKS : Nat = 1;
   transient let AD_MAX_BLOCKS : Nat = 288;
   transient let AD_MAX_QUEUE : Nat = 3;
-  // The hard stop scales with what was paid for: 12h per block (i.e. the
-  // chain averaging under 2 blocks/day for the whole ad, slower than
-  // anything seen outside a full stop), never less than 30 days even for
-  // a 1-block ad -- so a paid ad isn't cut short just because mining was
-  // slow or stopped for a while.
-  transient let AD_LIFETIME_NANOS_PER_BLOCK : Nat = 12 * 3_600_000_000_000;
+  // The hard stop scales with what was paid for: 30 days for a 1-block
+  // ad, plus 24h for every extra block -- so a paid ad isn't cut short
+  // just because mining was slow or stopped for a while.
+  transient let AD_LIFETIME_NANOS_PER_BLOCK : Nat = 24 * 3_600_000_000_000;
   transient let AD_MIN_LIFETIME_DAYS : Nat = 30;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
@@ -374,7 +372,7 @@ actor self {
   };
 
   func adLifetimeNanos(blocks : Nat) : Nat {
-    Nat.max(AD_MIN_LIFETIME_DAYS * DAY_NANOS, blocks * AD_LIFETIME_NANOS_PER_BLOCK);
+    AD_MIN_LIFETIME_DAYS * DAY_NANOS + (if (blocks > 1) { blocks - 1 } else { 0 }) * AD_LIFETIME_NANOS_PER_BLOCK;
   };
 
   func entryFinished(e : Types.AdEntry, height : Nat, now : Time.Time) : Bool {
