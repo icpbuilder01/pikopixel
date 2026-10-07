@@ -274,7 +274,7 @@ actor self {
   // found for this long (counted from its own start if that's later), so
   // slow mining never cuts a paid ad short -- only a chain that has
   // really stopped does.
-  transient let AD_STALL_STOP_DAYS : Nat = 30;
+  transient let AD_STALL_STOP_DAYS : Nat = 90;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
   transient let AD_IMAGE_WIDTH : Nat = 64;
