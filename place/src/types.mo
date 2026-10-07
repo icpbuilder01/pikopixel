@@ -159,7 +159,7 @@ module {
     minBlocks : Nat;
     maxBlocks : Nat;
     maxQueue : Nat; // waiting ads allowed per slot, on top of the running one
-    minLifetimeDays : Nat; // hard stop: max(minLifetimeDays, blocks x lifetimeHoursPerBlock)
+    minLifetimeDays : Nat; // hard stop: minLifetimeDays + (blocks - 1) x lifetimeHoursPerBlock
     lifetimeHoursPerBlock : Nat;
     maxTextChars : Nat;
     maxLinkChars : Nat;

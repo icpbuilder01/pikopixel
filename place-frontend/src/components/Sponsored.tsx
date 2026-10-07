@@ -394,9 +394,9 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
         Rent one of {market.slots.length} slots shown on PikoPixel, the PIKO mining site and the
         PikoNativeMiner app: a line of text, an optional link and an optional {IMAGE_WIDTH}x{IMAGE_HEIGHT}{" "}
         pixel image. You pay per PIKO <strong>block</strong>, by burning PIKO: your ad stays up until that
-        many blocks are mined, so it never runs out while nobody is mining (it only stops early if
-        mining averages under 2 blocks a day: {market.lifetimeHoursPerBlock.toString()}h per block paid,
-        at least {market.minLifetimeDays.toString()} days). A busy slot takes up to {maxQueue} more ads in line.
+        many blocks are mined, so it never runs out while nobody is mining (safety stop if no blocks
+        come: {market.minLifetimeDays.toString()} days for 1 block, +{market.lifetimeHoursPerBlock.toString()}h
+        per extra block). A busy slot takes up to {maxQueue} more ads in line.
         The price sets itself: every rental raises it by 20%, every day without one lowers it by 10%,
         never below {formatPiko(market.floorPricePerBlockE8s)} PIKO/block.
       </p>
