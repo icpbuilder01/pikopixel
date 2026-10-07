@@ -7,13 +7,17 @@ cd "$(dirname "$0")/.."
 echo "==> Starting local ICP network..."
 icp network start -d
 
-echo "==> Deploying test-ledger, place, place-frontend..."
-icp deploy test-ledger place place-frontend -y
+echo "==> Deploying test-ledger, test-mother, place, place-frontend..."
+icp deploy test-ledger test-mother place place-frontend -y
 
 TEST_LEDGER_ID=$(icp canister status test-ledger -i)
 DEPLOYER_ID=$(icp identity principal)
 echo "==> Pointing place at the local test-ledger ($TEST_LEDGER_ID) instead of its real-mainnet default -- the local ledger's own minting account is the deployer identity ($DEPLOYER_ID), see test-ledger/icrc1_ledger_init.args..."
 icp canister call place setPikoLedgerId "(principal \"$TEST_LEDGER_ID\", principal \"$DEPLOYER_ID\")"
+
+TEST_MOTHER_ID=$(icp canister status test-mother -i)
+echo "==> Pointing place at the local test-mother ($TEST_MOTHER_ID) for block heights (set it with: icp canister call test-mother setHeight '(123)')..."
+icp canister call place setMotherId "(principal \"$TEST_MOTHER_ID\")"
 
 PLACE_FRONTEND_ID=$(icp canister status place-frontend -i)
 

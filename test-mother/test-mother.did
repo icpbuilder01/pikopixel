@@ -1,0 +1,4 @@
+service : {
+  getStats: () -> (record {height: nat; difficultyBits: nat; targetBlockTimeNanos: nat}) query;
+  setHeight: (h: nat) -> ();
+}
