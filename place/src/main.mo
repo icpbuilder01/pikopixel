@@ -129,6 +129,7 @@ actor self {
     {
       totalPlacements;
       totalBurnedPiko;
+      totalAdBurnedE8s;
       distinctPainters = Map.size(painterPlacements);
       gridSize = GRID_SIZE;
       paletteSize = Nat8.toNat(PALETTE_SIZE);
@@ -254,9 +255,12 @@ actor self {
   transient let AD_MAX_DAYS : Nat = 7;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
+  transient let AD_SUSPICIOUS_REPORTS : Nat = 3;
+  // Past this many, more reports change nothing visible -- caps storage.
+  transient let AD_MAX_STORED_REPORTERS : Nat = 50;
 
   // var (not let) so a future upgrade can grow it if AD_SLOT_COUNT changes.
-  var adSlots : [var ?Types.Ad] = VarArray.repeat<?Types.Ad>(null, AD_SLOT_COUNT);
+  var adSlots : [var ?Types.StoredAd] = VarArray.repeat<?Types.StoredAd>(null, AD_SLOT_COUNT);
   var adBasePricePerDayE8s : Nat = AD_START_PRICE_PER_DAY_E8S;
   var adBasePriceSetAt : Time.Time = Time.now();
   var totalAdRentals : Nat = 0;
@@ -308,17 +312,51 @@ actor self {
     true;
   };
 
-  func activeAd(slot : Nat, now : Time.Time) : ?Types.Ad {
+  func activeStoredAd(slot : Nat, now : Time.Time) : ?Types.StoredAd {
     switch (adSlots[slot]) {
       case (?ad) { if (ad.expiresAt > now) { ?ad } else { null } };
       case null { null };
     };
   };
 
-  public query func getAdMarket() : async Types.AdMarket {
+  func adView(ad : Types.StoredAd) : Types.Ad {
+    {
+      slot = ad.slot;
+      text = ad.text;
+      link = ad.link;
+      advertiser = ad.advertiser;
+      rentedAt = ad.rentedAt;
+      expiresAt = ad.expiresAt;
+      burnedE8s = ad.burnedE8s;
+      reports = ad.reporters.size();
+      suspicious = ad.reporters.size() >= AD_SUSPICIOUS_REPORTS;
+    };
+  };
+
+  func activeAd(slot : Nat, now : Time.Time) : ?Types.Ad {
+    switch (activeStoredAd(slot, now)) {
+      case (?ad) { ?adView(ad) };
+      case null { null };
+    };
+  };
+
+  public shared query ({ caller }) func getAdMarket() : async Types.AdMarket {
     let now = Time.now();
     {
-      slots = Array.tabulate<Types.AdSlot>(adSlots.size(), func(i) { { slot = i; ad = activeAd(i, now) } });
+      slots = Array.tabulate<Types.AdSlot>(
+        adSlots.size(),
+        func(i) {
+          let stored = activeStoredAd(i, now);
+          {
+            slot = i;
+            ad = switch (stored) { case (?ad) { ?adView(ad) }; case null { null } };
+            reportedByMe = switch (stored) {
+              case (?ad) { Array.find<Principal>(ad.reporters, func(p) { p == caller }) != null };
+              case null { false };
+            };
+          };
+        },
+      );
       pricePerDayE8s = currentAdPricePerDay(now);
       floorPricePerDayE8s = AD_FLOOR_PRICE_PER_DAY_E8S;
       maxDays = AD_MAX_DAYS;
@@ -326,6 +364,7 @@ actor self {
       maxLinkChars = AD_MAX_LINK_CHARS;
       totalAdRentals;
       totalAdBurnedE8s;
+      suspiciousAfterReports = AD_SUSPICIOUS_REPORTS;
     };
   };
 
@@ -381,7 +420,7 @@ actor self {
 
     // A running ad belongs to its advertiser until it expires; only they
     // can extend it, and the extension starts where the current one ends.
-    let running = activeAd(slot, now);
+    let running = activeStoredAd(slot, now);
     let (startsFrom, rentedAt, burnedBefore) = switch (running) {
       case (?ad) {
         if (ad.advertiser != caller) { return #Err(#SlotTaken({ expiresAt = ad.expiresAt })) };
@@ -419,7 +458,13 @@ actor self {
       case null { return #Err(#TransferFailed(#TemporarilyUnavailable)) };
     };
 
-    let ad : Types.Ad = {
+    // Re-read after the await: reports may have landed on the running ad
+    // meanwhile (adSlotInFlight kept every other rental of it out).
+    let reporters = switch (running, adSlots[slot]) {
+      case (?_, ?current) { current.reporters };
+      case _ { [] };
+    };
+    let ad : Types.StoredAd = {
       slot;
       text;
       link;
@@ -427,6 +472,7 @@ actor self {
       rentedAt;
       expiresAt;
       burnedE8s = burnedBefore + cost;
+      reporters;
     };
     adSlots[slot] := ?ad;
     totalAdRentals += 1;
@@ -434,7 +480,35 @@ actor self {
     let paidAt = Time.now();
     adBasePricePerDayE8s := currentAdPricePerDay(paidAt) * AD_PRICE_STEP_UP_PCT / 100;
     adBasePriceSetAt := paidAt;
-    #Ok(ad);
+    #Ok(adView(ad));
+  };
+
+  // Flags a running ad. Only a warning label, never removal: once enough
+  // distinct painters flag it, every frontend shows it as suspicious.
+  // Requiring at least one placed pixel (a real 2 PIKO burn) keeps a
+  // swarm of free throwaway logins from flagging every ad.
+  public shared ({ caller }) func reportAd(slot : Nat) : async Types.ReportAdResult {
+    if (Principal.isAnonymous(caller)) { return #Err(#Anonymous) };
+    if (slot >= adSlots.size()) { return #Err(#InvalidSlot) };
+    let ad = switch (activeStoredAd(slot, Time.now())) {
+      case (?ad) { ad };
+      case null { return #Err(#NoActiveAd) };
+    };
+    if (ad.advertiser == caller) { return #Err(#OwnAd) };
+    switch (Map.get(painterPlacements, Principal.compare, caller)) {
+      case (?n) { if (n == 0) { return #Err(#NotAPainter) } };
+      case null { return #Err(#NotAPainter) };
+    };
+    if (Array.find<Principal>(ad.reporters, func(p) { p == caller }) != null) {
+      return #Err(#AlreadyReported);
+    };
+    let reporters = if (ad.reporters.size() >= AD_MAX_STORED_REPORTERS) { ad.reporters } else {
+      Array.concat(ad.reporters, [caller]);
+    };
+    let updated = { ad with reporters };
+    adSlots[slot] := ?updated;
+    let view = adView(updated);
+    #Ok({ reports = view.reports; suspicious = view.suspicious });
   };
 
   // ---- Cycles top-up (no ICP/PIKO income of its own to convert -- every

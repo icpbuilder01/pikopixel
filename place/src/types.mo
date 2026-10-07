@@ -77,7 +77,8 @@ module {
 
   public type Stats = {
     totalPlacements : Nat;
-    totalBurnedPiko : Nat;
+    totalBurnedPiko : Nat; // pixels only
+    totalAdBurnedE8s : Nat; // sponsored slots
     distinctPainters : Nat;
     gridSize : Nat;
     paletteSize : Nat;
@@ -105,11 +106,28 @@ module {
     rentedAt : Time.Time;
     expiresAt : Time.Time;
     burnedE8s : Nat; // total PIKO burned for this ad so far, extensions included
+    reports : Nat; // distinct logged-in painters who flagged it
+    suspicious : Bool; // reports >= the suspicious threshold: every frontend shows a warning
+  };
+
+  /// What the canister keeps per slot. Reporters stay with the ad through
+  /// extensions and text changes (so flags can't be shed by editing), and
+  /// are cleared only when a different advertiser rents the slot.
+  public type StoredAd = {
+    slot : Nat;
+    text : Text;
+    link : ?Text;
+    advertiser : Principal;
+    rentedAt : Time.Time;
+    expiresAt : Time.Time;
+    burnedE8s : Nat;
+    reporters : [Principal];
   };
 
   public type AdSlot = {
     slot : Nat;
     ad : ?Ad; // null = free (never rented, or the last ad expired)
+    reportedByMe : Bool; // the caller already flagged the running ad
   };
 
   public type AdMarket = {
@@ -121,6 +139,7 @@ module {
     maxLinkChars : Nat;
     totalAdRentals : Nat;
     totalAdBurnedE8s : Nat;
+    suspiciousAfterReports : Nat;
   };
 
   public type RentAdError = {
@@ -138,4 +157,15 @@ module {
   };
 
   public type RentAdResult = { #Ok : Ad; #Err : RentAdError };
+
+  public type ReportAdError = {
+    #Anonymous;
+    #InvalidSlot;
+    #NoActiveAd;
+    #NotAPainter; // only people who placed at least one pixel can report
+    #OwnAd;
+    #AlreadyReported;
+  };
+
+  public type ReportAdResult = { #Ok : { reports : Nat; suspicious : Bool }; #Err : ReportAdError };
 }

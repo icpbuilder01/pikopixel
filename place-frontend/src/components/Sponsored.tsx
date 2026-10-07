@@ -4,7 +4,7 @@ import { Principal } from "@icp-sdk/core/principal";
 import { getPlaceActor, getLedgerActor } from "../lib/actors";
 import { placeCanisterId } from "../lib/canister-env";
 import { formatPiko, shortPrincipal, timeUntil } from "../lib/format";
-import type { Ad, AdMarket, RentAdError } from "../bindings/place/place";
+import { ReportAdError, type Ad, type AdMarket, type RentAdError } from "../bindings/place/place";
 
 // Shown next to every ad, everywhere ads appear (this site, the browser
 // mining site, PikoNativeMiner): nobody reviews these, by design.
@@ -49,6 +49,25 @@ function rentErrorMessage(err: RentAdError): string {
   }
 }
 
+function reportErrorMessage(err: ReportAdError): string {
+  switch (err) {
+    case ReportAdError.Anonymous:
+      return "Log in to report an ad.";
+    case ReportAdError.NotAPainter:
+      return "Place at least one pixel first -- that's what stops throwaway accounts from flagging every ad.";
+    case ReportAdError.AlreadyReported:
+      return "You already reported this ad.";
+    case ReportAdError.OwnAd:
+      return "That's your own ad.";
+    case ReportAdError.NoActiveAd:
+      return "That ad already expired.";
+    default:
+      return "Couldn't report that ad.";
+  }
+}
+
+export const SUSPICIOUS_WARNING = "⚠ Reported as suspicious by several players -- be extra careful";
+
 /** Rotating one-line banner of the ads currently running. Renders nothing when there are none. */
 export function SponsoredBanner() {
   const [ads, setAds] = useState<Ad[]>([]);
@@ -76,6 +95,7 @@ export function SponsoredBanner() {
   return (
     <aside className="sponsored-banner" aria-label="Sponsored">
       <span className="sponsored-label">{AD_DISCLAIMER}</span>
+      {ad.suspicious && <span className="sponsored-warning">{SUSPICIOUS_WARNING}</span>}
       <span className="sponsored-text">{ad.text}</span>
       {ad.link && (
         <a className="sponsored-link mono" href={ad.link} target="_blank" rel="noopener noreferrer nofollow">
@@ -157,6 +177,32 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
     setLink(own?.link ?? "");
   }
 
+  async function handleReport(n: number) {
+    if (!identity) return;
+    if (!window.confirm(`Report the ad in slot ${n + 1} as a scam or abusive? It adds a public warning once several players report it.`)) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await getPlaceActor(identity).reportAd(BigInt(n));
+      if (result.__kind__ === "Ok") {
+        setMessage({
+          kind: "good",
+          text: result.Ok.suspicious
+            ? "Reported -- this ad is now shown with a warning everywhere."
+            : `Reported (${result.Ok.reports.toString()}/${market?.suspiciousAfterReports.toString()} before a warning is shown).`,
+        });
+      } else {
+        setMessage({ kind: "critical", text: reportErrorMessage(result.Err) });
+      }
+      refresh();
+    } catch (err) {
+      console.error("reportAd failed", err);
+      setMessage({ kind: "critical", text: "Report failed -- try again." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleRent(e: React.FormEvent) {
     e.preventDefault();
     if (!identity || slot === null) return;
@@ -235,28 +281,41 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
           const mine = s.ad && s.ad.advertiser.toText() === me;
           const canPick = !!identity && (!s.ad || mine);
           return (
-            <button
-              key={n}
-              type="button"
-              className={`ad-slot ${slot === n ? "active" : ""} ${s.ad ? "taken" : "free"}`}
-              onClick={() => canPick && pick(n)}
-              disabled={!canPick}
-            >
-              <span className="stat-label">
-                Slot {n + 1} · {s.ad ? `${mine ? "yours, " : ""}${timeUntil(s.ad.expiresAt)} left` : "free"}
-              </span>
-              {s.ad ? (
-                <>
-                  <span className="ad-slot-text">{s.ad.text}</span>
-                  {s.ad.link && <span className="ad-slot-link mono">{s.ad.link}</span>}
-                  <span className="ad-slot-meta mono">
-                    {shortPrincipal(s.ad.advertiser.toText())} · {formatPiko(s.ad.burnedE8s)} PIKO burned
-                  </span>
-                </>
-              ) : (
-                <span className="ad-slot-text muted">{identity ? "Click to rent" : "Log in to rent"}</span>
+            <div key={n} className="ad-slot-wrap">
+              <button
+                type="button"
+                className={`ad-slot ${slot === n ? "active" : ""} ${s.ad ? "taken" : "free"} ${s.ad?.suspicious ? "suspicious" : ""}`}
+                onClick={() => canPick && pick(n)}
+                disabled={!canPick}
+              >
+                <span className="stat-label">
+                  Slot {n + 1} · {s.ad ? `${mine ? "yours, " : ""}${timeUntil(s.ad.expiresAt)} left` : "free"}
+                </span>
+                {s.ad ? (
+                  <>
+                    {s.ad.suspicious && <span className="sponsored-warning">{SUSPICIOUS_WARNING}</span>}
+                    <span className="ad-slot-text">{s.ad.text}</span>
+                    {s.ad.link && <span className="ad-slot-link mono">{s.ad.link}</span>}
+                    <span className="ad-slot-meta mono">
+                      {shortPrincipal(s.ad.advertiser.toText())} · {formatPiko(s.ad.burnedE8s)} PIKO burned
+                      {s.ad.reports > 0n ? ` · ${s.ad.reports.toString()} report${s.ad.reports > 1n ? "s" : ""}` : ""}
+                    </span>
+                  </>
+                ) : (
+                  <span className="ad-slot-text muted">{identity ? "Click to rent" : "Log in to rent"}</span>
+                )}
+              </button>
+              {identity && s.ad && !mine && (
+                <button
+                  type="button"
+                  className="ad-report"
+                  onClick={() => handleReport(n)}
+                  disabled={busy || s.reportedByMe}
+                >
+                  {s.reportedByMe ? "Reported" : "⚑ Report this ad"}
+                </button>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
