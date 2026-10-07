@@ -93,12 +93,12 @@ export function SponsoredBanner() {
   if (ads.length === 0) return null;
   const ad = ads[index % ads.length];
   return (
-    <aside className="sponsored-banner" aria-label="Sponsored">
-      <span className="sponsored-label">{AD_DISCLAIMER}</span>
-      {ad.suspicious && <span className="sponsored-warning">{SUSPICIOUS_WARNING}</span>}
-      <span className="sponsored-text">{ad.text}</span>
+    <aside className="board-strip" aria-label="Community board">
+      <span className="board-strip-label">{AD_DISCLAIMER}</span>
+      {ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
+      <span className="board-strip-text">{ad.text}</span>
       {ad.link && (
-        <a className="sponsored-link mono" href={ad.link} target="_blank" rel="noopener noreferrer nofollow">
+        <a className="board-strip-link mono" href={ad.link} target="_blank" rel="noopener noreferrer nofollow">
           {ad.link}
         </a>
       )}
@@ -275,16 +275,16 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
         be refunded, including if your ad turns out to be useless to you.
       </div>
 
-      <div className="ad-slots">
+      <div className="board-grid">
         {market.slots.map((s) => {
           const n = Number(s.slot);
           const mine = s.ad && s.ad.advertiser.toText() === me;
           const canPick = !!identity && (!s.ad || mine);
           return (
-            <div key={n} className="ad-slot-wrap">
+            <div key={n} className="board-cell">
               <button
                 type="button"
-                className={`ad-slot ${slot === n ? "active" : ""} ${s.ad ? "taken" : "free"} ${s.ad?.suspicious ? "suspicious" : ""}`}
+                className={`board-slot ${slot === n ? "active" : ""} ${s.ad ? "taken" : "free"} ${s.ad?.suspicious ? "suspicious" : ""}`}
                 onClick={() => canPick && pick(n)}
                 disabled={!canPick}
               >
@@ -293,22 +293,22 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
                 </span>
                 {s.ad ? (
                   <>
-                    {s.ad.suspicious && <span className="sponsored-warning">{SUSPICIOUS_WARNING}</span>}
-                    <span className="ad-slot-text">{s.ad.text}</span>
-                    {s.ad.link && <span className="ad-slot-link mono">{s.ad.link}</span>}
-                    <span className="ad-slot-meta mono">
+                    {s.ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
+                    <span className="board-cell-text">{s.ad.text}</span>
+                    {s.ad.link && <span className="board-cell-link mono">{s.ad.link}</span>}
+                    <span className="board-cell-meta mono">
                       {shortPrincipal(s.ad.advertiser.toText())} · {formatPiko(s.ad.burnedE8s)} PIKO burned
                       {s.ad.reports > 0n ? ` · ${s.ad.reports.toString()} report${s.ad.reports > 1n ? "s" : ""}` : ""}
                     </span>
                   </>
                 ) : (
-                  <span className="ad-slot-text muted">{identity ? "Click to rent" : "Log in to rent"}</span>
+                  <span className="board-cell-text muted">{identity ? "Click to rent" : "Log in to rent"}</span>
                 )}
               </button>
               {identity && s.ad && !mine && (
                 <button
                   type="button"
-                  className="ad-report"
+                  className="board-flag"
                   onClick={() => handleReport(n)}
                   disabled={busy || s.reportedByMe}
                 >
@@ -329,12 +329,12 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
       )}
 
       {identity && selected && maxDays > 0 && (
-        <form className="ad-form" onSubmit={handleRent}>
-          <label className="stat-label" htmlFor="ad-text">
+        <form className="board-form" onSubmit={handleRent}>
+          <label className="stat-label" htmlFor="board-msg">
             Text ({text.length}/{market.maxTextChars.toString()})
           </label>
           <input
-            id="ad-text"
+            id="board-msg"
             className="input"
             value={text}
             maxLength={Number(market.maxTextChars)}
@@ -342,22 +342,22 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
             placeholder="What should people read?"
             required
           />
-          <label className="stat-label" htmlFor="ad-link">
+          <label className="stat-label" htmlFor="board-url">
             Link (optional, https:// only, shown as plain text in the app)
           </label>
           <input
-            id="ad-link"
+            id="board-url"
             className="input mono"
             value={link}
             maxLength={Number(market.maxLinkChars)}
             onChange={(e) => setLink(e.target.value)}
             placeholder="https://"
           />
-          <label className="stat-label" htmlFor="ad-days">
+          <label className="stat-label" htmlFor="board-days">
             {isExtension ? "Extend by" : "Duration"}: {days} day{days > 1 ? "s" : ""}
           </label>
           <input
-            id="ad-days"
+            id="board-days"
             type="range"
             min={1}
             max={maxDays}

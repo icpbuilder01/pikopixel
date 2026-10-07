@@ -1457,7 +1457,7 @@ p.pull-quote {
 
 /* ---- Sponsored slots ---- */
 
-.sponsored-banner {
+.board-strip {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1474,7 +1474,7 @@ p.pull-quote {
   box-shadow: 3px 3px 0 var(--hard-shadow);
 }
 
-.sponsored-label {
+.board-strip-label {
   flex-basis: 100%;
   color: var(--text-muted);
   font-size: 0.66rem;
@@ -1483,27 +1483,27 @@ p.pull-quote {
   letter-spacing: 0.05em;
 }
 
-.sponsored-text {
+.board-strip-text {
   color: var(--text);
   font-size: 0.9rem;
   overflow-wrap: anywhere;
 }
 
-.sponsored-link,
-.ad-slot-link {
+.board-strip-link,
+.board-cell-link {
   color: var(--spark);
   font-size: 0.76rem;
   overflow-wrap: anywhere;
 }
 
-.ad-slots {
+.board-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
   margin: 14px 0;
 }
 
-.ad-slot {
+.board-slot {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1522,54 +1522,54 @@ p.pull-quote {
   border-right-color: var(--bevel-hi);
 }
 
-.ad-slot:disabled {
+.board-slot:disabled {
   cursor: default;
 }
 
-.ad-slot.active {
+.board-slot.active {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.ad-slot-text {
+.board-cell-text {
   font-size: 0.86rem;
   overflow-wrap: anywhere;
 }
 
-.ad-slot-text.muted,
-.ad-slot-meta {
+.board-cell-text.muted,
+.board-cell-meta {
   color: var(--text-muted);
   font-size: 0.72rem;
 }
 
-.ad-form {
+.board-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
 }
 
-.ad-form input[type="range"] {
+.board-form input[type="range"] {
   accent-color: var(--accent);
 }
 
-.ad-slot-wrap {
+.board-cell {
   display: flex;
   flex-direction: column;
 }
 
-.ad-slot.suspicious {
+.board-slot.suspicious {
   border-left: 5px solid var(--critical);
 }
 
-.sponsored-warning {
+.board-warning {
   flex-basis: 100%;
   color: var(--critical);
   font-size: 0.74rem;
   font-weight: 700;
 }
 
-.ad-report {
+.board-flag {
   align-self: flex-end;
   margin-top: 4px;
   padding: 2px 4px;
@@ -1582,11 +1582,11 @@ p.pull-quote {
   text-decoration: underline;
 }
 
-.ad-report:hover:not(:disabled) {
+.board-flag:hover:not(:disabled) {
   color: var(--critical);
 }
 
-.ad-report:disabled {
+.board-flag:disabled {
   cursor: default;
   text-decoration: none;
 }
