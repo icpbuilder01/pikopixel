@@ -28,6 +28,25 @@ type Stats =
    totalBurnedPiko: nat;
    totalPlacements: nat;
  };
+type RentAdResult = 
+ variant {
+   Err: RentAdError;
+   Ok: Ad;
+ };
+type RentAdError = 
+ variant {
+   Anonymous;
+   ExtensionTooLong;
+   InvalidDuration;
+   InvalidLink;
+   InvalidSlot;
+   InvalidText;
+   PriceAboveMax: record {pricePerDayE8s: nat;};
+   SlotBusy;
+   SlotTaken: record {expiresAt: Time;};
+   TooSoon: record {retryAfterNanos: nat;};
+   TransferFailed: TransferFromError;
+ };
 type RecentPlacement = 
  record {
    color: nat8;
@@ -57,7 +76,35 @@ type Config =
    pikoLedgerLocked: bool;
    pixelFeeE8s: nat;
  };
+type AdSlot = 
+ record {
+   ad: opt Ad;
+   slot: nat;
+ };
+type AdMarket = 
+ record {
+   floorPricePerDayE8s: nat;
+   maxDays: nat;
+   maxLinkChars: nat;
+   maxTextChars: nat;
+   pricePerDayE8s: nat;
+   slots: vec AdSlot;
+   totalAdBurnedE8s: nat;
+   totalAdRentals: nat;
+ };
+type Ad = 
+ record {
+   advertiser: principal;
+   burnedE8s: nat;
+   expiresAt: Time;
+   link: opt text;
+   rentedAt: Time;
+   slot: nat;
+   "text": text;
+ };
 service : {
+  getActiveAds: () -> (vec Ad) query;
+  getAdMarket: () -> (AdMarket) query;
   getCanvas: () -> (vec nat8) query;
   getConfig: () -> (Config) query;
   getRecentPlacements: () -> (vec RecentPlacement) query;
@@ -66,6 +113,8 @@ service : {
   lockPikoLedgerId: () -> ();
   placePixel: (x: nat, y: nat, color: nat8) -> (PlaceResult);
   pruneStalePlaceAttempts: () -> (nat);
+  rentAdSlot: (slot: nat, "text": text, link: opt text, days: nat,
+   maxPricePerDayE8s: nat) -> (RentAdResult);
   resetCanvas: () -> ();
   setPikoLedgerId: (id: principal, mintingAccount: principal) -> ();
   topUpPlaceFrontend: () -> (record {sent: nat;});

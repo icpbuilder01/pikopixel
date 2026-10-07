@@ -5,6 +5,7 @@ import { getPlaceActor, getLedgerActor } from "./lib/actors";
 import { login, logout, getStoredIdentity } from "./lib/auth";
 import { formatPiko, parseAmount, shortPrincipal, timeAgo } from "./lib/format";
 import { Canvas } from "./components/Canvas";
+import { SponsoredBanner, Advertise } from "./components/Sponsored";
 import type { Stats, RecentPlacement, TopPainter } from "./bindings/place/place";
 import "./App.css";
 
@@ -197,6 +198,8 @@ function App() {
       )}
       {sendStatus && <p className="wallet-status">{sendStatus}</p>}
 
+      <SponsoredBanner />
+
       <div className="disclaimer">
         <strong>This isn't a bet -- it's a burn.</strong> Every pixel permanently destroys a small
         amount of PIKO (sent straight to the ledger's minting account), same as any other ICRC-1 burn.
@@ -219,6 +222,8 @@ function App() {
       </section>
 
       <Canvas identity={identity} onPlaced={handlePlaced} />
+
+      <Advertise identity={identity} onRented={handlePlaced} />
 
       <section className="block story-block">
         <h2>

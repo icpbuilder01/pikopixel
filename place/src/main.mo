@@ -1,6 +1,8 @@
 import Principal "mo:core/Principal";
 import Nat "mo:core/Nat";
 import Nat8 "mo:core/Nat8";
+import Char "mo:core/Char";
+import Text "mo:core/Text";
 import Int "mo:core/Int";
 import Time "mo:core/Time";
 import Cycles "mo:core/Cycles";
@@ -221,6 +223,218 @@ actor self {
     Map.add(painterPlacements, Principal.compare, caller, prior + 1);
     pushRecent({ player = caller; x; y; color; timestamp = now });
     #Ok;
+  };
+
+  // ---- Sponsored text slots (added 2026-10-07) ----
+  //
+  // A handful of text-only ad slots, rented by burning PIKO -- the exact
+  // same icrc2_transfer_from-to-the-minting-account path as placePixel,
+  // so this canister still never holds any PIKO, even briefly. The active
+  // ads are read (query, free) by this site, the browser mining site and
+  // PikoNativeMiner.
+  //
+  // Deliberately unmoderated: there is no controller function to edit or
+  // hide an ad. Every frontend shows a "not verified" notice next to the
+  // ads instead. Burned PIKO can't be refunded by anyone.
+  //
+  // Pricing adjusts itself, so it never needs a controller to retune it
+  // as PIKO's market price moves: every successful rental raises the
+  // per-day price by AD_PRICE_STEP_UP_PCT, every full day without one
+  // lowers it by AD_PRICE_DECAY_PCT, never below the floor (which is
+  // just an anti-spam minimum). Decay is computed lazily from
+  // adBasePriceSetAt -- no timer needed.
+
+  transient let E8S : Nat = 100_000_000;
+  transient let DAY_NANOS : Nat = 86_400_000_000_000;
+  transient let AD_SLOT_COUNT : Nat = 3;
+  transient let AD_START_PRICE_PER_DAY_E8S : Nat = 300 * E8S;
+  transient let AD_FLOOR_PRICE_PER_DAY_E8S : Nat = 50 * E8S;
+  transient let AD_PRICE_STEP_UP_PCT : Nat = 120; // x1.2 after each rental
+  transient let AD_PRICE_DECAY_PCT : Nat = 90; // x0.9 per full day without one
+  transient let AD_MAX_DAYS : Nat = 7;
+  transient let AD_MAX_TEXT_CHARS : Nat = 80;
+  transient let AD_MAX_LINK_CHARS : Nat = 100;
+
+  // var (not let) so a future upgrade can grow it if AD_SLOT_COUNT changes.
+  var adSlots : [var ?Types.Ad] = VarArray.repeat<?Types.Ad>(null, AD_SLOT_COUNT);
+  var adBasePricePerDayE8s : Nat = AD_START_PRICE_PER_DAY_E8S;
+  var adBasePriceSetAt : Time.Time = Time.now();
+  var totalAdRentals : Nat = 0;
+  var totalAdBurnedE8s : Nat = 0;
+  // Set synchronously before rentAdSlot's ledger await and cleared right
+  // after it, so two rentals of the same slot can never both be charged.
+  transient let adSlotInFlight : [var Bool] = VarArray.repeat<Bool>(false, AD_SLOT_COUNT);
+
+  func currentAdPricePerDay(now : Time.Time) : Nat {
+    var price = adBasePricePerDayE8s;
+    var days = if (now > adBasePriceSetAt) { Int.toNat(now - adBasePriceSetAt) / DAY_NANOS } else { 0 };
+    while (days > 0 and price > AD_FLOOR_PRICE_PER_DAY_E8S) {
+      price := price * AD_PRICE_DECAY_PCT / 100;
+      days -= 1;
+    };
+    Nat.max(price, AD_FLOOR_PRICE_PER_DAY_E8S);
+  };
+
+  // Control characters, the C1 range, line/paragraph separators and
+  // bidi overrides (which could visually reorder text to fake something
+  // else) are rejected; everything else, emoji included, is fine.
+  func isAllowedAdChar(c : Char) : Bool {
+    let n = Char.toNat32(c);
+    not (
+      n < 32 or (n >= 127 and n <= 159) or n == 0x2028 or n == 0x2029 or
+      (n >= 0x200E and n <= 0x200F) or (n >= 0x202A and n <= 0x202E) or
+      (n >= 0x2066 and n <= 0x2069)
+    );
+  };
+
+  func isValidAdText(text : Text) : Bool {
+    if (text.size() == 0 or text.size() > AD_MAX_TEXT_CHARS) { return false };
+    var hasVisible = false;
+    for (c in text.chars()) {
+      if (not isAllowedAdChar(c)) { return false };
+      if (not Char.isWhitespace(c)) { hasVisible := true };
+    };
+    hasVisible;
+  };
+
+  // Printable ASCII only: no spaces, and no look-alike Unicode domains.
+  func isValidAdLink(link : Text) : Bool {
+    if (link.size() <= 8 or link.size() > AD_MAX_LINK_CHARS) { return false };
+    if (not Text.startsWith(link, #text "https://")) { return false };
+    for (c in link.chars()) {
+      let n = Char.toNat32(c);
+      if (n < 33 or n > 126) { return false };
+    };
+    true;
+  };
+
+  func activeAd(slot : Nat, now : Time.Time) : ?Types.Ad {
+    switch (adSlots[slot]) {
+      case (?ad) { if (ad.expiresAt > now) { ?ad } else { null } };
+      case null { null };
+    };
+  };
+
+  public query func getAdMarket() : async Types.AdMarket {
+    let now = Time.now();
+    {
+      slots = Array.tabulate<Types.AdSlot>(adSlots.size(), func(i) { { slot = i; ad = activeAd(i, now) } });
+      pricePerDayE8s = currentAdPricePerDay(now);
+      floorPricePerDayE8s = AD_FLOOR_PRICE_PER_DAY_E8S;
+      maxDays = AD_MAX_DAYS;
+      maxTextChars = AD_MAX_TEXT_CHARS;
+      maxLinkChars = AD_MAX_LINK_CHARS;
+      totalAdRentals;
+      totalAdBurnedE8s;
+    };
+  };
+
+  // The small, stable call the mining site and PikoNativeMiner poll: only
+  // the ads currently running, nothing else.
+  public query func getActiveAds() : async [Types.Ad] {
+    let now = Time.now();
+    var out : [Types.Ad] = [];
+    for (i in Nat.range(0, adSlots.size())) {
+      switch (activeAd(i, now)) {
+        case (?ad) { out := Array.concat(out, [ad]) };
+        case null {};
+      };
+    };
+    out;
+  };
+
+  // Rents a free slot, or extends the caller's own running ad (text/link
+  // can be changed at the same time). `maxPricePerDayE8s` protects the
+  // caller from paying more than the price they were shown, since another
+  // rental can raise it in between. Cost = price per day x days, burned.
+  public shared ({ caller }) func rentAdSlot(
+    slot : Nat,
+    text : Text,
+    link : ?Text,
+    days : Nat,
+    maxPricePerDayE8s : Nat,
+  ) : async Types.RentAdResult {
+    if (Principal.isAnonymous(caller)) { return #Err(#Anonymous) };
+
+    // Shares placePixel's cooldown map: same purpose (no free tight-loop
+    // ledger calls), and one map means one prune.
+    let now = Time.now();
+    switch (Map.get(lastPlaceAttempt, Principal.compare, caller)) {
+      case (?last) {
+        let remaining = MIN_PLACE_INTERVAL_NANOS - (now - last);
+        if (remaining > 0) {
+          return #Err(#TooSoon({ retryAfterNanos = Int.toNat(remaining) }));
+        };
+      };
+      case null {};
+    };
+    Map.add(lastPlaceAttempt, Principal.compare, caller, now);
+
+    if (slot >= adSlots.size()) { return #Err(#InvalidSlot) };
+    if (days == 0 or days > AD_MAX_DAYS) { return #Err(#InvalidDuration) };
+    if (not isValidAdText(text)) { return #Err(#InvalidText) };
+    switch (link) {
+      case (?l) { if (not isValidAdLink(l)) { return #Err(#InvalidLink) } };
+      case null {};
+    };
+    if (adSlotInFlight[slot]) { return #Err(#SlotBusy) };
+
+    // A running ad belongs to its advertiser until it expires; only they
+    // can extend it, and the extension starts where the current one ends.
+    let running = activeAd(slot, now);
+    let (startsFrom, rentedAt, burnedBefore) = switch (running) {
+      case (?ad) {
+        if (ad.advertiser != caller) { return #Err(#SlotTaken({ expiresAt = ad.expiresAt })) };
+        (ad.expiresAt, ad.rentedAt, ad.burnedE8s);
+      };
+      case null { (now, now, 0) };
+    };
+    let expiresAt = startsFrom + days * DAY_NANOS;
+    if (expiresAt - now > AD_MAX_DAYS * DAY_NANOS) { return #Err(#ExtensionTooLong) };
+
+    let pricePerDay = currentAdPricePerDay(now);
+    if (pricePerDay > maxPricePerDayE8s) { return #Err(#PriceAboveMax({ pricePerDayE8s = pricePerDay })) };
+    let cost = pricePerDay * days;
+
+    adSlotInFlight[slot] := true;
+    let Ledger : Types.LedgerActor = actor (Principal.toText(pikoLedgerId));
+    let outcome = try {
+      ?(
+        await Ledger.icrc2_transfer_from({
+          spender_subaccount = null;
+          from = { owner = caller; subaccount = null };
+          to = { owner = pikoMintingAccount; subaccount = null };
+          amount = cost;
+          fee = null;
+          memo = null;
+          created_at_time = null;
+        })
+      );
+    } catch (_e) { null };
+    adSlotInFlight[slot] := false;
+
+    switch (outcome) {
+      case (? #Ok(_)) {};
+      case (? #Err(e)) { return #Err(#TransferFailed(e)) };
+      case null { return #Err(#TransferFailed(#TemporarilyUnavailable)) };
+    };
+
+    let ad : Types.Ad = {
+      slot;
+      text;
+      link;
+      advertiser = caller;
+      rentedAt;
+      expiresAt;
+      burnedE8s = burnedBefore + cost;
+    };
+    adSlots[slot] := ?ad;
+    totalAdRentals += 1;
+    totalAdBurnedE8s += cost;
+    let paidAt = Time.now();
+    adBasePricePerDayE8s := currentAdPricePerDay(paidAt) * AD_PRICE_STEP_UP_PCT / 100;
+    adBasePriceSetAt := paidAt;
+    #Ok(ad);
   };
 
   // ---- Cycles top-up (no ICP/PIKO income of its own to convert -- every
