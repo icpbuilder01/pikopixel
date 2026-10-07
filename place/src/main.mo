@@ -226,57 +226,100 @@ actor self {
     #Ok;
   };
 
-  // ---- Sponsored text slots (added 2026-10-07) ----
+  // ---- Sponsored slots ----
   //
-  // A handful of text-only ad slots, rented by burning PIKO -- the exact
-  // same icrc2_transfer_from-to-the-minting-account path as placePixel,
-  // so this canister still never holds any PIKO, even briefly. The active
-  // ads are read (query, free) by this site, the browser mining site and
+  // A handful of ad slots (text, optional link, optional small pixel-art
+  // image), rented by burning PIKO -- the exact same
+  // icrc2_transfer_from-to-the-minting-account path as placePixel, so this
+  // canister still never holds any PIKO, even briefly. The active ads are
+  // read (query, free) by this site, the browser mining site and
   // PikoNativeMiner.
+  //
+  // Ads are bought in PIKO *blocks*, not days (suggested by a community
+  // member, 2026-10-07): when nobody mines, nobody is looking at the mining
+  // apps either, so the ad simply stays up until enough blocks have gone
+  // by. A hard AD_MAX_LIFETIME cap still ends it if the chain ever stops
+  // for good, so no slot can be held forever. Each slot runs one ad and
+  // queues up to AD_MAX_QUEUE more, each starting where the previous ends.
+  //
+  // mother (PIKO's mining canister) lives on another subnet, so queries
+  // here can't ask it for the height directly: a timer caches it every
+  // HEIGHT_REFRESH_SECONDS, and every rental re-reads it fresh.
   //
   // Deliberately unmoderated: there is no controller function to edit or
   // hide an ad. Every frontend shows a "not verified" notice next to the
-  // ads instead. Burned PIKO can't be refunded by anyone.
+  // ads, players can flag them, and a flagged ad's image is hidden.
+  // Burned PIKO can't be refunded by anyone.
   //
   // Pricing adjusts itself, so it never needs a controller to retune it
   // as PIKO's market price moves: every successful rental raises the
-  // per-day price by AD_PRICE_STEP_UP_PCT, every full day without one
-  // lowers it by AD_PRICE_DECAY_PCT, never below the floor (which is
-  // just an anti-spam minimum). Decay is computed lazily from
-  // adBasePriceSetAt -- no timer needed.
+  // per-block price by AD_PRICE_STEP_UP_PCT, every full day without one
+  // lowers it by AD_PRICE_DECAY_PCT, never below the floor (which is just
+  // an anti-spam minimum). Decay is computed lazily from adBasePriceSetAt.
 
   transient let E8S : Nat = 100_000_000;
   transient let DAY_NANOS : Nat = 86_400_000_000_000;
   transient let AD_SLOT_COUNT : Nat = 3;
-  transient let AD_START_PRICE_PER_DAY_E8S : Nat = 300 * E8S;
-  transient let AD_FLOOR_PRICE_PER_DAY_E8S : Nat = 50 * E8S;
+  transient let AD_START_PRICE_PER_BLOCK_E8S : Nat = 1 * E8S; // ~288 PIKO/day at the 5-min target
+  transient let AD_FLOOR_PRICE_PER_BLOCK_E8S : Nat = 20_000_000; // 0.2 PIKO
   transient let AD_PRICE_STEP_UP_PCT : Nat = 120; // x1.2 after each rental
   transient let AD_PRICE_DECAY_PCT : Nat = 90; // x0.9 per full day without one
-  transient let AD_MAX_DAYS : Nat = 7;
+  transient let AD_MIN_BLOCKS : Nat = 12; // ~1h at the 5-min target
+  transient let AD_MAX_BLOCKS : Nat = 2_016; // ~7 days at the 5-min target
+  transient let AD_MAX_QUEUE : Nat = 3;
+  transient let AD_MAX_LIFETIME_DAYS : Nat = 30;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
+  transient let AD_IMAGE_WIDTH : Nat = 32;
+  transient let AD_IMAGE_HEIGHT : Nat = 16;
   transient let AD_SUSPICIOUS_REPORTS : Nat = 3;
   // Past this many, more reports change nothing visible -- caps storage.
   transient let AD_MAX_STORED_REPORTERS : Nat = 50;
+  transient let TARGET_BLOCK_SECONDS : Nat = 300; // mother's own 5-minute target, display only
+  transient let HEIGHT_REFRESH_SECONDS : Nat = 60;
 
-  // var (not let) so a future upgrade can grow it if AD_SLOT_COUNT changes.
+  // Dead since block-based queues replaced them (2026-10-08); kept only so
+  // the stable signature stays compatible across that upgrade.
   var adSlots : [var ?Types.StoredAd] = VarArray.repeat<?Types.StoredAd>(null, AD_SLOT_COUNT);
-  var adBasePricePerDayE8s : Nat = AD_START_PRICE_PER_DAY_E8S;
+  var adBasePricePerDayE8s : Nat = 0;
+
+  var adQueues : [var [Types.AdEntry]] = VarArray.repeat<[Types.AdEntry]>([], AD_SLOT_COUNT);
+  var nextAdId : Nat = 0;
+  var adBasePricePerBlockE8s : Nat = AD_START_PRICE_PER_BLOCK_E8S;
   var adBasePriceSetAt : Time.Time = Time.now();
   var totalAdRentals : Nat = 0;
   var totalAdBurnedE8s : Nat = 0;
-  // Set synchronously before rentAdSlot's ledger await and cleared right
-  // after it, so two rentals of the same slot can never both be charged.
+  // Set synchronously before rentAdSlot's first await and cleared after
+  // its last, so two rentals of the same slot can never interleave.
   transient let adSlotInFlight : [var Bool] = VarArray.repeat<Bool>(false, AD_SLOT_COUNT);
 
-  func currentAdPricePerDay(now : Time.Time) : Nat {
-    var price = adBasePricePerDayE8s;
+  // mother is also PIKO's minting account, hence the same default. Same
+  // set-then-lock pattern as pikoLedgerId: redirectable to a local mock
+  // for development only.
+  var motherId : Principal = Principal.fromText("45mjf-rqaaa-aaaaj-qsedq-cai");
+  var motherLocked : Bool = false;
+  var lastKnownHeight : Nat = 0;
+  var heightUpdatedAt : Time.Time = 0;
+
+  public shared ({ caller }) func setMotherId(id : Principal) : async () {
+    requireController(caller);
+    if (motherLocked) { Runtime.trap("mother id is permanently locked") };
+    motherId := id;
+  };
+
+  public shared ({ caller }) func lockMotherId() : async () {
+    requireController(caller);
+    motherLocked := true;
+  };
+
+  func currentAdPricePerBlock(now : Time.Time) : Nat {
+    var price = adBasePricePerBlockE8s;
     var days = if (now > adBasePriceSetAt) { Int.toNat(now - adBasePriceSetAt) / DAY_NANOS } else { 0 };
-    while (days > 0 and price > AD_FLOOR_PRICE_PER_DAY_E8S) {
+    while (days > 0 and price > AD_FLOOR_PRICE_PER_BLOCK_E8S) {
       price := price * AD_PRICE_DECAY_PCT / 100;
       days -= 1;
     };
-    Nat.max(price, AD_FLOOR_PRICE_PER_DAY_E8S);
+    Nat.max(price, AD_FLOOR_PRICE_PER_BLOCK_E8S);
   };
 
   // Control characters, the C1 range, line/paragraph separators and
@@ -312,56 +355,119 @@ actor self {
     true;
   };
 
-  func activeStoredAd(slot : Nat, now : Time.Time) : ?Types.StoredAd {
-    switch (adSlots[slot]) {
-      case (?ad) { if (ad.expiresAt > now) { ?ad } else { null } };
-      case null { null };
+  // Exactly one palette index per pixel -- the same palette as the canvas.
+  func isValidAdImage(image : Blob) : Bool {
+    if (image.size() != AD_IMAGE_WIDTH * AD_IMAGE_HEIGHT) { return false };
+    for (b in image.vals()) {
+      if (b >= PALETTE_SIZE) { return false };
+    };
+    true;
+  };
+
+  func adLifetimeNanos() : Nat { AD_MAX_LIFETIME_DAYS * DAY_NANOS };
+
+  func entryFinished(e : Types.AdEntry, height : Nat, now : Time.Time) : Bool {
+    switch (e.startHeight, e.startedAt) {
+      case (?sh, ?st) { height >= sh + e.blocks or now >= st + adLifetimeNanos() };
+      case _ { false };
     };
   };
 
-  func adView(ad : Types.StoredAd) : Types.Ad {
+  func entrySuspicious(e : Types.AdEntry) : Bool { e.reporters.size() >= AD_SUSPICIOUS_REPORTS };
+
+  func adView(e : Types.AdEntry, height : Nat) : Types.Ad {
+    let suspicious = entrySuspicious(e);
     {
-      slot = ad.slot;
-      text = ad.text;
-      link = ad.link;
-      advertiser = ad.advertiser;
-      rentedAt = ad.rentedAt;
-      expiresAt = ad.expiresAt;
-      burnedE8s = ad.burnedE8s;
-      reports = ad.reporters.size();
-      suspicious = ad.reporters.size() >= AD_SUSPICIOUS_REPORTS;
+      id = e.id;
+      slot = e.slot;
+      text = e.text;
+      link = e.link;
+      image = if (suspicious) { null } else { e.image };
+      imageHidden = suspicious and e.image != null;
+      advertiser = e.advertiser;
+      blocks = e.blocks;
+      blocksLeft = switch (e.startHeight) {
+        case (?sh) { if (sh + e.blocks > height) { sh + e.blocks - height } else { 0 } };
+        case null { e.blocks };
+      };
+      startHeight = e.startHeight;
+      deadline = switch (e.startedAt) { case (?st) { ?(st + adLifetimeNanos()) }; case null { null } };
+      burnedE8s = e.burnedE8s;
+      reports = e.reporters.size();
+      suspicious;
     };
   };
 
-  func activeAd(slot : Nat, now : Time.Time) : ?Types.Ad {
-    switch (activeStoredAd(slot, now)) {
-      case (?ad) { ?adView(ad) };
-      case null { null };
-    };
+  // The not-yet-finished entries of a slot, in running order: [0] is the
+  // ad on screen. Pure, so queries see the same thing advanceQueue() will
+  // commit on the next timer tick.
+  func liveEntries(slot : Nat, height : Nat, now : Time.Time) : [Types.AdEntry] {
+    Array.filter<Types.AdEntry>(adQueues[slot], func(e) { not entryFinished(e, height, now) });
+  };
+
+  // Drops finished ads and starts the next one at the current height.
+  func advanceQueue(slot : Nat, height : Nat, now : Time.Time) {
+    let live = liveEntries(slot, height, now);
+    adQueues[slot] := if (live.size() > 0 and live[0].startHeight == null) {
+      Array.tabulate<Types.AdEntry>(
+        live.size(),
+        func(i) { if (i == 0) { { live[0] with startHeight = ?height; startedAt = ?now } } else { live[i] } },
+      );
+    } else { live };
+  };
+
+  func advanceAllQueues() {
+    let now = Time.now();
+    for (i in Nat.range(0, adQueues.size())) { advanceQueue(i, lastKnownHeight, now) };
+  };
+
+  // Never traps: false means mother couldn't be reached, and the cached
+  // height is left as it was.
+  func refreshHeight() : async* Bool {
+    let Mother : Types.MotherActor = actor (Principal.toText(motherId));
+    try {
+      let stats = await Mother.getStats();
+      lastKnownHeight := Nat.max(lastKnownHeight, stats.height);
+      heightUpdatedAt := Time.now();
+      true;
+    } catch (_e) { false };
   };
 
   public shared query ({ caller }) func getAdMarket() : async Types.AdMarket {
     let now = Time.now();
     {
       slots = Array.tabulate<Types.AdSlot>(
-        adSlots.size(),
+        adQueues.size(),
         func(i) {
-          let stored = activeStoredAd(i, now);
+          let live = liveEntries(i, lastKnownHeight, now);
+          let current = if (live.size() > 0) { ?live[0] } else { null };
           {
             slot = i;
-            ad = switch (stored) { case (?ad) { ?adView(ad) }; case null { null } };
-            reportedByMe = switch (stored) {
-              case (?ad) { Array.find<Principal>(ad.reporters, func(p) { p == caller }) != null };
+            current = switch (current) { case (?e) { ?adView(e, lastKnownHeight) }; case null { null } };
+            queue = Array.tabulate<Types.Ad>(
+              if (live.size() > 0) { live.size() - 1 } else { 0 },
+              func(j) { adView(live[j + 1], lastKnownHeight) },
+            );
+            reportedByMe = switch (current) {
+              case (?e) { Array.find<Principal>(e.reporters, func(p) { p == caller }) != null };
               case null { false };
             };
           };
         },
       );
-      pricePerDayE8s = currentAdPricePerDay(now);
-      floorPricePerDayE8s = AD_FLOOR_PRICE_PER_DAY_E8S;
-      maxDays = AD_MAX_DAYS;
+      pricePerBlockE8s = currentAdPricePerBlock(now);
+      floorPricePerBlockE8s = AD_FLOOR_PRICE_PER_BLOCK_E8S;
+      minBlocks = AD_MIN_BLOCKS;
+      maxBlocks = AD_MAX_BLOCKS;
+      maxQueue = AD_MAX_QUEUE;
+      maxLifetimeDays = AD_MAX_LIFETIME_DAYS;
       maxTextChars = AD_MAX_TEXT_CHARS;
       maxLinkChars = AD_MAX_LINK_CHARS;
+      imageWidth = AD_IMAGE_WIDTH;
+      imageHeight = AD_IMAGE_HEIGHT;
+      currentHeight = lastKnownHeight;
+      heightUpdatedAt;
+      targetBlockSeconds = TARGET_BLOCK_SECONDS;
       totalAdRentals;
       totalAdBurnedE8s;
       suspiciousAfterReports = AD_SUSPICIOUS_REPORTS;
@@ -369,29 +475,28 @@ actor self {
   };
 
   // The small, stable call the mining site and PikoNativeMiner poll: only
-  // the ads currently running, nothing else.
+  // the ads currently on screen, nothing else.
   public query func getActiveAds() : async [Types.Ad] {
     let now = Time.now();
     var out : [Types.Ad] = [];
-    for (i in Nat.range(0, adSlots.size())) {
-      switch (activeAd(i, now)) {
-        case (?ad) { out := Array.concat(out, [ad]) };
-        case null {};
-      };
+    for (i in Nat.range(0, adQueues.size())) {
+      let live = liveEntries(i, lastKnownHeight, now);
+      if (live.size() > 0) { out := Array.concat(out, [adView(live[0], lastKnownHeight)]) };
     };
     out;
   };
 
-  // Rents a free slot, or extends the caller's own running ad (text/link
-  // can be changed at the same time). `maxPricePerDayE8s` protects the
+  // Rents a slot for `blocks` PIKO blocks: runs right away if the slot is
+  // free, otherwise waits in its queue. `maxPricePerBlockE8s` protects the
   // caller from paying more than the price they were shown, since another
-  // rental can raise it in between. Cost = price per day x days, burned.
+  // rental can raise it in between. Cost = price per block x blocks, burned.
   public shared ({ caller }) func rentAdSlot(
     slot : Nat,
     text : Text,
     link : ?Text,
-    days : Nat,
-    maxPricePerDayE8s : Nat,
+    image : ?Blob,
+    blocks : Nat,
+    maxPricePerBlockE8s : Nat,
   ) : async Types.RentAdResult {
     if (Principal.isAnonymous(caller)) { return #Err(#Anonymous) };
 
@@ -409,33 +514,33 @@ actor self {
     };
     Map.add(lastPlaceAttempt, Principal.compare, caller, now);
 
-    if (slot >= adSlots.size()) { return #Err(#InvalidSlot) };
-    if (days == 0 or days > AD_MAX_DAYS) { return #Err(#InvalidDuration) };
+    if (slot >= adQueues.size()) { return #Err(#InvalidSlot) };
+    if (blocks < AD_MIN_BLOCKS or blocks > AD_MAX_BLOCKS) { return #Err(#InvalidBlocks) };
     if (not isValidAdText(text)) { return #Err(#InvalidText) };
     switch (link) {
       case (?l) { if (not isValidAdLink(l)) { return #Err(#InvalidLink) } };
       case null {};
     };
-    if (adSlotInFlight[slot]) { return #Err(#SlotBusy) };
-
-    // A running ad belongs to its advertiser until it expires; only they
-    // can extend it, and the extension starts where the current one ends.
-    let running = activeStoredAd(slot, now);
-    let (startsFrom, rentedAt, burnedBefore) = switch (running) {
-      case (?ad) {
-        if (ad.advertiser != caller) { return #Err(#SlotTaken({ expiresAt = ad.expiresAt })) };
-        (ad.expiresAt, ad.rentedAt, ad.burnedE8s);
-      };
-      case null { (now, now, 0) };
+    switch (image) {
+      case (?img) { if (not isValidAdImage(img)) { return #Err(#InvalidImage) } };
+      case null {};
     };
-    let expiresAt = startsFrom + days * DAY_NANOS;
-    if (expiresAt - now > AD_MAX_DAYS * DAY_NANOS) { return #Err(#ExtensionTooLong) };
+    if (adSlotInFlight[slot]) { return #Err(#SlotBusy) };
+    if (liveEntries(slot, lastKnownHeight, now).size() > AD_MAX_QUEUE) { return #Err(#QueueFull) };
 
-    let pricePerDay = currentAdPricePerDay(now);
-    if (pricePerDay > maxPricePerDayE8s) { return #Err(#PriceAboveMax({ pricePerDayE8s = pricePerDay })) };
-    let cost = pricePerDay * days;
+    let pricePerBlock = currentAdPricePerBlock(now);
+    if (pricePerBlock > maxPricePerBlockE8s) {
+      return #Err(#PriceAboveMax({ pricePerBlockE8s = pricePerBlock }));
+    };
+    let cost = pricePerBlock * blocks;
 
     adSlotInFlight[slot] := true;
+    // Fresh height first: an ad that starts right now must start at the
+    // real current block, and nothing is charged if mother is unreachable.
+    if (not (await* refreshHeight())) {
+      adSlotInFlight[slot] := false;
+      return #Err(#HeightUnavailable);
+    };
     let Ledger : Types.LedgerActor = actor (Principal.toText(pikoLedgerId));
     let outcome = try {
       ?(
@@ -458,42 +563,49 @@ actor self {
       case null { return #Err(#TransferFailed(#TemporarilyUnavailable)) };
     };
 
-    // Re-read after the await: reports may have landed on the running ad
-    // meanwhile (adSlotInFlight kept every other rental of it out).
-    let reporters = switch (running, adSlots[slot]) {
-      case (?_, ?current) { current.reporters };
-      case _ { [] };
-    };
-    let ad : Types.StoredAd = {
+    let paidAt = Time.now();
+    let entry : Types.AdEntry = {
+      id = nextAdId;
       slot;
       text;
       link;
+      image;
       advertiser = caller;
-      rentedAt;
-      expiresAt;
-      burnedE8s = burnedBefore + cost;
-      reporters;
+      paidAt;
+      blocks;
+      burnedE8s = cost;
+      startHeight = null;
+      startedAt = null;
+      reporters = [];
     };
-    adSlots[slot] := ?ad;
+    nextAdId += 1;
+    advanceQueue(slot, lastKnownHeight, paidAt);
+    adQueues[slot] := Array.concat(adQueues[slot], [entry]);
+    advanceQueue(slot, lastKnownHeight, paidAt);
     totalAdRentals += 1;
     totalAdBurnedE8s += cost;
-    let paidAt = Time.now();
-    adBasePricePerDayE8s := currentAdPricePerDay(paidAt) * AD_PRICE_STEP_UP_PCT / 100;
+    adBasePricePerBlockE8s := currentAdPricePerBlock(paidAt) * AD_PRICE_STEP_UP_PCT / 100;
     adBasePriceSetAt := paidAt;
-    #Ok(adView(ad));
+    let stored = switch (Array.find<Types.AdEntry>(adQueues[slot], func(e) { e.id == entry.id })) {
+      case (?e) { e };
+      case null { entry };
+    };
+    #Ok(adView(stored, lastKnownHeight));
   };
 
-  // Flags a running ad. Only a warning label, never removal: once enough
-  // distinct painters flag it, every frontend shows it as suspicious.
-  // Requiring at least one placed pixel (a real 2 PIKO burn) keeps a
-  // swarm of free throwaway logins from flagging every ad.
+  // Flags the ad currently on screen in a slot. Only a warning label (and
+  // its image hidden), never removal: once enough distinct painters flag
+  // it, every frontend shows it as suspicious. Requiring at least one
+  // placed pixel (a real 2 PIKO burn) keeps a swarm of free throwaway
+  // logins from flagging every ad.
   public shared ({ caller }) func reportAd(slot : Nat) : async Types.ReportAdResult {
     if (Principal.isAnonymous(caller)) { return #Err(#Anonymous) };
-    if (slot >= adSlots.size()) { return #Err(#InvalidSlot) };
-    let ad = switch (activeStoredAd(slot, Time.now())) {
-      case (?ad) { ad };
-      case null { return #Err(#NoActiveAd) };
-    };
+    if (slot >= adQueues.size()) { return #Err(#InvalidSlot) };
+    let now = Time.now();
+    advanceQueue(slot, lastKnownHeight, now);
+    let queue = adQueues[slot];
+    if (queue.size() == 0) { return #Err(#NoActiveAd) };
+    let ad = queue[0];
     if (ad.advertiser == caller) { return #Err(#OwnAd) };
     switch (Map.get(painterPlacements, Principal.compare, caller)) {
       case (?n) { if (n == 0) { return #Err(#NotAPainter) } };
@@ -506,9 +618,8 @@ actor self {
       Array.concat(ad.reporters, [caller]);
     };
     let updated = { ad with reporters };
-    adSlots[slot] := ?updated;
-    let view = adView(updated);
-    #Ok({ reports = view.reports; suspicious = view.suspicious });
+    adQueues[slot] := Array.tabulate<Types.AdEntry>(queue.size(), func(i) { if (i == 0) { updated } else { queue[i] } });
+    #Ok({ reports = updated.reporters.size(); suspicious = entrySuspicious(updated) });
   };
 
   // ---- Cycles top-up (no ICP/PIKO income of its own to convert -- every
@@ -577,7 +688,29 @@ actor self {
     );
   };
 
-  system func postupgrade() { armSweepTimer<system>() };
+  transient var heightTimerId : ?Timer.TimerId = null;
+
+  func armHeightTimer<system>() {
+    switch (heightTimerId) {
+      case (?id) { Timer.cancelTimer(id) };
+      case null {};
+    };
+    heightTimerId := ?Timer.recurringTimer<system>(
+      #seconds HEIGHT_REFRESH_SECONDS,
+      func() : async () {
+        ignore (await* refreshHeight());
+        advanceAllQueues();
+      },
+    );
+  };
+
+  // Timers don't survive upgrades, and these top-level calls only run on
+  // first install -- postupgrade re-arms both.
+  system func postupgrade() {
+    armSweepTimer<system>();
+    armHeightTimer<system>();
+  };
 
   armSweepTimer<system>();
+  armHeightTimer<system>();
 };

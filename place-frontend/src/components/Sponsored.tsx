@@ -1,20 +1,35 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Identity } from "@icp-sdk/core/agent";
 import { Principal } from "@icp-sdk/core/principal";
 import { getPlaceActor, getLedgerActor } from "../lib/actors";
 import { placeCanisterId } from "../lib/canister-env";
-import { formatPiko, shortPrincipal, timeUntil } from "../lib/format";
+import { formatPiko, shortPrincipal } from "../lib/format";
+import { PALETTE } from "../lib/palette";
 import { ReportAdError, type Ad, type AdMarket, type RentAdError } from "../bindings/place/place";
 
 // Shown next to every ad, everywhere ads appear (this site, the browser
 // mining site, PikoNativeMiner): nobody reviews these, by design.
 export const AD_DISCLAIMER = "Sponsored · not verified by PIKO · do your own research";
+export const SUSPICIOUS_WARNING = "⚠ Reported as suspicious by several players -- be extra careful";
 
 const POLL_MS = 10_000;
 const ROTATE_MS = 8_000;
 const PIKO_LEDGER_FEE_E8S = 10_000n; // same gotcha as Canvas.tsx's approve flow
+const IMAGE_WIDTH = 32; // must match AD_IMAGE_WIDTH/HEIGHT in place/src/main.mo
+const IMAGE_HEIGHT = 16;
+const BLOCK_STEP = 12; // the duration slider moves in ~1h steps at the 5-min target
 
 const placePrincipal = Principal.fromText(placeCanisterId);
+
+/** "≈ 1 day 4 h" for a number of blocks at the chain's target block time. */
+function blocksToDuration(blocks: bigint | number, targetSeconds: bigint | number): string {
+  const minutes = Math.round((Number(blocks) * Number(targetSeconds)) / 60);
+  if (minutes < 60) return `≈ ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `≈ ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 === 0 ? `≈ ${days} day${days > 1 ? "s" : ""}` : `≈ ${days} day${days > 1 ? "s" : ""} ${hours % 24} h`;
+}
 
 function rentErrorMessage(err: RentAdError): string {
   switch (err.__kind__) {
@@ -24,20 +39,22 @@ function rentErrorMessage(err: RentAdError): string {
       return "Slow down a little -- try again in a moment.";
     case "InvalidSlot":
       return "That slot doesn't exist.";
-    case "SlotTaken":
-      return `That slot is taken for another ${timeUntil(err.SlotTaken.expiresAt)}.`;
+    case "QueueFull":
+      return "That slot's waiting list is full -- try another slot.";
     case "SlotBusy":
       return "Someone is renting that slot right now -- try again in a few seconds.";
     case "InvalidText":
       return "Text must be 1-80 characters, on one line.";
     case "InvalidLink":
       return "Link must start with https:// and contain no spaces or special characters.";
-    case "InvalidDuration":
-      return "Pick between 1 and 7 days.";
-    case "ExtensionTooLong":
-      return "An ad can't run more than 7 days ahead -- pick fewer days.";
+    case "InvalidImage":
+      return "The image is invalid -- clear it and draw it again.";
+    case "InvalidBlocks":
+      return "Pick a duration within the allowed range.";
+    case "HeightUnavailable":
+      return "Couldn't read the current PIKO block height -- nothing was charged, try again.";
     case "PriceAboveMax":
-      return `The price just changed to ${formatPiko(err.PriceAboveMax.pricePerDayE8s)} PIKO/day -- check it and try again.`;
+      return `The price just changed to ${formatPiko(err.PriceAboveMax.pricePerBlockE8s)} PIKO/block -- check it and try again.`;
     case "TransferFailed": {
       const inner = err.TransferFailed;
       if (inner.__kind__ === "InsufficientFunds") return "Not enough PIKO for this rental.";
@@ -60,15 +77,103 @@ function reportErrorMessage(err: ReportAdError): string {
     case ReportAdError.OwnAd:
       return "That's your own ad.";
     case ReportAdError.NoActiveAd:
-      return "That ad already expired.";
+      return "That ad already ended.";
     default:
       return "Couldn't report that ad.";
   }
 }
 
-export const SUSPICIOUS_WARNING = "⚠ Reported as suspicious by several players -- be extra careful";
+/** Renders a 32x16 palette-index image, scaled up with crisp pixels. */
+export function AdImage({ image, scale = 4 }: { image: Uint8Array; scale?: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const ctx = ref.current?.getContext("2d");
+    if (!ctx) return;
+    for (let i = 0; i < IMAGE_WIDTH * IMAGE_HEIGHT; i++) {
+      ctx.fillStyle = PALETTE[image[i]] ?? PALETTE[0];
+      ctx.fillRect(i % IMAGE_WIDTH, Math.floor(i / IMAGE_WIDTH), 1, 1);
+    }
+  }, [image]);
+  return (
+    <canvas
+      ref={ref}
+      className="board-image"
+      width={IMAGE_WIDTH}
+      height={IMAGE_HEIGHT}
+      style={{ width: IMAGE_WIDTH * scale, height: IMAGE_HEIGHT * scale }}
+    />
+  );
+}
 
-/** Rotating one-line banner of the ads currently running. Renders nothing when there are none. */
+/** Click or drag to paint a 32x16 image with the canvas palette. */
+function ImageEditor({
+  value,
+  onChange,
+}: {
+  value: Uint8Array;
+  onChange: React.Dispatch<React.SetStateAction<Uint8Array>>;
+}) {
+  const [color, setColor] = useState(3);
+  const painting = useRef(false);
+  const scale = 12;
+
+  function paintAt(e: React.PointerEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - rect.left) / rect.width) * IMAGE_WIDTH);
+    const y = Math.floor(((e.clientY - rect.top) / rect.height) * IMAGE_HEIGHT);
+    if (x < 0 || y < 0 || x >= IMAGE_WIDTH || y >= IMAGE_HEIGHT) return;
+    const i = y * IMAGE_WIDTH + x;
+    // From the latest image, not this render's: several pointer events can
+    // land before React re-renders during a fast drag.
+    onChange((prev) => {
+      if (prev[i] === color) return prev;
+      const next = prev.slice();
+      next[i] = color;
+      return next;
+    });
+  }
+
+  return (
+    <div className="board-editor">
+      <div
+        className="board-editor-surface"
+        style={{ width: IMAGE_WIDTH * scale, maxWidth: "100%", aspectRatio: `${IMAGE_WIDTH} / ${IMAGE_HEIGHT}` }}
+        onPointerDown={(e) => {
+          painting.current = true;
+          paintAt(e);
+          try {
+            // Keeps a drag painting even when it leaves the surface briefly.
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // Not available for this pointer; dragging just stops at the edge.
+          }
+        }}
+        onPointerMove={(e) => painting.current && paintAt(e)}
+        onPointerUp={() => (painting.current = false)}
+        onPointerCancel={() => (painting.current = false)}
+      >
+        <AdImage image={value} scale={scale} />
+      </div>
+      <div className="place-palette">
+        {PALETTE.map((hex, i) => (
+          <button
+            key={hex}
+            type="button"
+            className={`place-swatch ${color === i ? "active" : ""}`}
+            style={{ background: hex }}
+            onClick={() => setColor(i)}
+            aria-label={`Color ${i}`}
+          />
+        ))}
+      </div>
+      <button type="button" className="button secondary small" onClick={() => onChange(new Uint8Array(IMAGE_WIDTH * IMAGE_HEIGHT))}>
+        Clear image
+      </button>
+    </div>
+  );
+}
+
+/** Rotating banner of the ads currently on screen. Renders nothing when there are none. */
 export function SponsoredBanner() {
   const [ads, setAds] = useState<Ad[]>([]);
   const [index, setIndex] = useState(0);
@@ -96,6 +201,7 @@ export function SponsoredBanner() {
     <aside className="board-strip" aria-label="Community board">
       <span className="board-strip-label">{AD_DISCLAIMER}</span>
       {ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
+      {ad.image && <AdImage image={ad.image} scale={3} />}
       <span className="board-strip-text">{ad.text}</span>
       {ad.link && (
         <a className="board-strip-link mono" href={ad.link} target="_blank" rel="noopener noreferrer nofollow">
@@ -113,22 +219,22 @@ interface AdvertiseProps {
 
 export function Advertise({ identity, onRented }: AdvertiseProps) {
   const [market, setMarket] = useState<AdMarket | null>(null);
-  const [fetchedAt, setFetchedAt] = useState(0);
   const [slot, setSlot] = useState<number | null>(null);
   const [text, setText] = useState("");
   const [link, setLink] = useState("");
-  const [days, setDays] = useState(1);
+  const [withImage, setWithImage] = useState(false);
+  const [image, setImage] = useState(() => new Uint8Array(IMAGE_WIDTH * IMAGE_HEIGHT));
+  const [blocks, setBlocks] = useState(288);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "good" | "critical"; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setMarket(await getPlaceActor().getAdMarket());
-      setFetchedAt(Date.now());
+      setMarket(await getPlaceActor(identity ?? undefined).getAdMarket());
     } catch (err) {
       console.error("Failed to load ad market", err);
     }
-  }, []);
+  }, [identity]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- polling on-chain state, not derived
@@ -149,37 +255,25 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
   }
 
   const me = identity?.getPrincipal().toText();
-  // A slot is selectable when it's free, or when it's the caller's own
-  // running ad (renting it again extends it).
-  const selectable = market.slots.filter((s) => !s.ad || s.ad.advertiser.toText() === me);
+  const maxQueue = Number(market.maxQueue);
   const selected = market.slots.find((s) => Number(s.slot) === slot) ?? null;
-  const isExtension = !!selected?.ad;
-  // An extension starts where the running ad ends, and the canister caps
-  // an ad at maxDays ahead of now -- so only the days left under that cap.
-  const maxDays = selected?.ad
-    ? Math.max(
-        0,
-        Math.floor(
-          (Number(market.maxDays) * 86_400_000 - (Number(selected.ad.expiresAt / 1_000_000n) - fetchedAt)) /
-            86_400_000,
-        ),
-      )
-    : Number(market.maxDays);
-  const price = market.pricePerDayE8s;
-  const cost = price * BigInt(days);
+  // Blocks to wait before a new ad in the selected slot would start.
+  const waitBlocks = selected
+    ? (selected.current?.blocksLeft ?? 0n) + selected.queue.reduce((sum, a) => sum + a.blocks, 0n)
+    : 0n;
+  const price = market.pricePerBlockE8s;
+  const cost = price * BigInt(blocks);
+  const minBlocks = Number(market.minBlocks);
+  const maxBlocks = Number(market.maxBlocks);
 
   function pick(n: number) {
     setSlot(n);
-    setDays(1);
     setMessage(null);
-    const own = market?.slots.find((s) => Number(s.slot) === n)?.ad;
-    setText(own?.text ?? "");
-    setLink(own?.link ?? "");
   }
 
   async function handleReport(n: number) {
     if (!identity) return;
-    if (!window.confirm(`Report the ad in slot ${n + 1} as a scam or abusive? It adds a public warning once several players report it.`)) return;
+    if (!window.confirm(`Report the ad in slot ${n + 1} as a scam or abusive? It adds a public warning (and hides its image) once several players report it.`)) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -188,7 +282,7 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
         setMessage({
           kind: "good",
           text: result.Ok.suspicious
-            ? "Reported -- this ad is now shown with a warning everywhere."
+            ? "Reported -- this ad is now shown with a warning everywhere, and its image is hidden."
             : `Reported (${result.Ok.reports.toString()}/${market?.suspiciousAfterReports.toString()} before a warning is shown).`,
         });
       } else {
@@ -231,13 +325,17 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
         BigInt(slot),
         text.trim(),
         trimmedLink === "" ? null : trimmedLink,
-        BigInt(days),
+        withImage ? image : null,
+        BigInt(blocks),
         price,
       );
       if (result.__kind__ === "Ok") {
         setMessage({
           kind: "good",
-          text: `Done -- ${formatPiko(cost)} PIKO burned, your ad runs for ${timeUntil(result.Ok.expiresAt)}.`,
+          text:
+            result.Ok.startHeight !== undefined
+              ? `Done -- ${formatPiko(cost)} PIKO burned, your ad is live for the next ${blocks} blocks.`
+              : `Done -- ${formatPiko(cost)} PIKO burned, your ad is queued and starts after ${waitBlocks.toString()} more blocks.`,
         });
         setSlot(null);
         refresh();
@@ -260,52 +358,64 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
         <h2>
           Advertise <span className="section-icon">📣</span>
         </h2>
-        <span className="dice-edge-pill">{formatPiko(price)} PIKO / day, burned</span>
+        <span className="dice-edge-pill">{formatPiko(price)} PIKO / block, burned</span>
       </div>
       <p className="section-intro">
-        Rent one of {market.slots.length} text slots shown on PikoPixel, the PIKO mining site and the
-        PikoNativeMiner app. You pay by burning PIKO, same as a pixel. The price sets itself: every
-        rental raises it by 20%, every day without one lowers it by 10%, never below{" "}
-        {formatPiko(market.floorPricePerDayE8s)} PIKO/day.
+        Rent one of {market.slots.length} slots shown on PikoPixel, the PIKO mining site and the
+        PikoNativeMiner app: a line of text, an optional link and an optional {IMAGE_WIDTH}x{IMAGE_HEIGHT}{" "}
+        pixel image. You pay per PIKO <strong>block</strong>, by burning PIKO: your ad stays up until that
+        many blocks are mined, so it never runs out while nobody is mining (hard limit{" "}
+        {market.maxLifetimeDays.toString()} days). A busy slot takes up to {maxQueue} more ads in line.
+        The price sets itself: every rental raises it by 20%, every day without one lowers it by 10%,
+        never below {formatPiko(market.floorPricePerBlockE8s)} PIKO/block.
       </p>
 
       <div className="disclaimer disclaimer-strong">
-        <strong>Ads are not reviewed by anyone.</strong> They're shown exactly as the advertiser wrote
-        them, with a "not verified" label. Never trust a link just because it's here. Burned PIKO can't
-        be refunded, including if your ad turns out to be useless to you.
+        <strong>Ads are not reviewed by anyone.</strong> They're shown exactly as the advertiser made them,
+        with a "not verified" label. Never trust a link just because it's here. Burned PIKO can't be
+        refunded, including if your ad turns out to be useless to you.
       </div>
 
       <div className="board-grid">
         {market.slots.map((s) => {
           const n = Number(s.slot);
-          const mine = s.ad && s.ad.advertiser.toText() === me;
-          const canPick = !!identity && (!s.ad || mine);
+          const ad = s.current;
+          const mine = ad && ad.advertiser.toText() === me;
+          const full = s.queue.length >= maxQueue && !!ad;
+          const canPick = !!identity && !full;
           return (
             <div key={n} className="board-cell">
               <button
                 type="button"
-                className={`board-slot ${slot === n ? "active" : ""} ${s.ad ? "taken" : "free"} ${s.ad?.suspicious ? "suspicious" : ""}`}
+                className={`board-slot ${slot === n ? "active" : ""} ${ad?.suspicious ? "suspicious" : ""}`}
                 onClick={() => canPick && pick(n)}
                 disabled={!canPick}
               >
                 <span className="stat-label">
-                  Slot {n + 1} · {s.ad ? `${mine ? "yours, " : ""}${timeUntil(s.ad.expiresAt)} left` : "free"}
+                  Slot {n + 1} ·{" "}
+                  {ad
+                    ? `${mine ? "yours, " : ""}${ad.blocksLeft.toString()} blocks left`
+                    : "free"}
+                  {s.queue.length > 0 ? ` · ${s.queue.length} waiting` : ""}
                 </span>
-                {s.ad ? (
+                {ad ? (
                   <>
-                    {s.ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
-                    <span className="board-cell-text">{s.ad.text}</span>
-                    {s.ad.link && <span className="board-cell-link mono">{s.ad.link}</span>}
+                    {ad.suspicious && <span className="board-warning">{SUSPICIOUS_WARNING}</span>}
+                    {ad.image && <AdImage image={ad.image} scale={3} />}
+                    {ad.imageHidden && <span className="board-cell-meta">(image hidden after reports)</span>}
+                    <span className="board-cell-text">{ad.text}</span>
+                    {ad.link && <span className="board-cell-link mono">{ad.link}</span>}
                     <span className="board-cell-meta mono">
-                      {shortPrincipal(s.ad.advertiser.toText())} · {formatPiko(s.ad.burnedE8s)} PIKO burned
-                      {s.ad.reports > 0n ? ` · ${s.ad.reports.toString()} report${s.ad.reports > 1n ? "s" : ""}` : ""}
+                      {shortPrincipal(ad.advertiser.toText())} · {formatPiko(ad.burnedE8s)} PIKO burned
+                      {ad.reports > 0n ? ` · ${ad.reports.toString()} report${ad.reports > 1n ? "s" : ""}` : ""}
                     </span>
                   </>
-                ) : (
-                  <span className="board-cell-text muted">{identity ? "Click to rent" : "Log in to rent"}</span>
-                )}
+                ) : null}
+                <span className="board-cell-text muted">
+                  {!identity ? "Log in to rent" : full ? "Waiting list full" : ad ? "Click to join the queue" : "Click to rent"}
+                </span>
               </button>
-              {identity && s.ad && !mine && (
+              {identity && ad && !mine && (
                 <button
                   type="button"
                   className="board-flag"
@@ -320,15 +430,7 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
         })}
       </div>
 
-      {identity && selectable.length === 0 && (
-        <p className="wallet-hint">All slots are taken right now -- check back when one expires.</p>
-      )}
-
-      {identity && selected && maxDays === 0 && (
-        <p className="wallet-hint">Your ad already runs the maximum {market.maxDays.toString()} days ahead -- extend it later.</p>
-      )}
-
-      {identity && selected && maxDays > 0 && (
+      {identity && selected && (
         <form className="board-form" onSubmit={handleRent}>
           <label className="stat-label" htmlFor="board-msg">
             Text ({text.length}/{market.maxTextChars.toString()})
@@ -353,29 +455,42 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
             onChange={(e) => setLink(e.target.value)}
             placeholder="https://"
           />
-          <label className="stat-label" htmlFor="board-days">
-            {isExtension ? "Extend by" : "Duration"}: {days} day{days > 1 ? "s" : ""}
+          <label className="board-toggle">
+            <input type="checkbox" checked={withImage} onChange={(e) => setWithImage(e.target.checked)} /> Add a{" "}
+            {IMAGE_WIDTH}x{IMAGE_HEIGHT} pixel image (hidden automatically if the ad gets reported)
+          </label>
+          {withImage && <ImageEditor value={image} onChange={setImage} />}
+          <label className="stat-label" htmlFor="board-blocks">
+            Duration: {blocks} blocks ({blocksToDuration(blocks, market.targetBlockSeconds)} of mining at the{" "}
+            {Number(market.targetBlockSeconds) / 60}-min target)
           </label>
           <input
-            id="board-days"
+            id="board-blocks"
             type="range"
-            min={1}
-            max={maxDays}
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+            min={minBlocks}
+            max={maxBlocks}
+            step={BLOCK_STEP}
+            value={blocks}
+            onChange={(e) => setBlocks(Number(e.target.value))}
           />
+          {waitBlocks > 0n && (
+            <p className="wallet-hint">
+              This slot is busy: your ad joins the queue and starts after {waitBlocks.toString()} more blocks
+              ({blocksToDuration(waitBlocks, market.targetBlockSeconds)} at the target pace).
+            </p>
+          )}
           <button type="submit" className="button" disabled={busy || text.trim() === ""}>
             {busy
               ? "Burning..."
-              : `${isExtension ? "Extend" : "Rent"} slot ${(slot ?? 0) + 1} -- burn ${formatPiko(cost)} PIKO`}
+              : `${waitBlocks > 0n ? "Queue in" : "Rent"} slot ${(slot ?? 0) + 1} -- burn ${formatPiko(cost)} PIKO`}
           </button>
         </form>
       )}
       {message && <p className={`mining-message ${message.kind}`}>{message.text}</p>}
 
       <p className="wallet-hint">
-        {market.totalAdRentals.toString()} rentals so far · {formatPiko(market.totalAdBurnedE8s)} PIKO
-        burned by ads
+        Block #{market.currentHeight.toString()} · {market.totalAdRentals.toString()} rentals so far ·{" "}
+        {formatPiko(market.totalAdBurnedE8s)} PIKO burned by ads
       </p>
     </section>
   );

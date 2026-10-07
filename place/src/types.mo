@@ -93,26 +93,11 @@ module {
     paletteSize : Nat;
   };
 
-  // ---- Sponsored text slots (added 2026-10-07) ----
+  // ---- Sponsored slots ----
 
-  /// One rented ad slot. Text-only on purpose (no images, no HTML): the
-  /// app and the mining site render `text`/`link` as plain text, never as
-  /// markup, and the native app never makes `link` clickable.
-  public type Ad = {
-    slot : Nat;
-    text : Text;
-    link : ?Text;
-    advertiser : Principal;
-    rentedAt : Time.Time;
-    expiresAt : Time.Time;
-    burnedE8s : Nat; // total PIKO burned for this ad so far, extensions included
-    reports : Nat; // distinct logged-in painters who flagged it
-    suspicious : Bool; // reports >= the suspicious threshold: every frontend shows a warning
-  };
-
-  /// What the canister keeps per slot. Reporters stay with the ad through
-  /// extensions and text changes (so flags can't be shed by editing), and
-  /// are cleared only when a different advertiser rents the slot.
+  /// 2026-10-07's time-based slot record. Only still declared so the old
+  /// `adSlots` stable var keeps a compatible type across the upgrade that
+  /// replaced it with block-based queues -- nothing reads it any more.
   public type StoredAd = {
     slot : Nat;
     text : Text;
@@ -124,19 +109,64 @@ module {
     reporters : [Principal];
   };
 
+  /// One paid ad, running or waiting in its slot's queue. It runs for
+  /// `blocks` PIKO blocks from the height it actually started at (so it
+  /// stays up while nobody mines), capped by a hard time limit so a dead
+  /// chain can't hold a slot forever.
+  public type AdEntry = {
+    id : Nat;
+    slot : Nat;
+    text : Text;
+    link : ?Text;
+    image : ?Blob; // imageWidth x imageHeight palette indices, row by row
+    advertiser : Principal;
+    paidAt : Time.Time;
+    blocks : Nat;
+    burnedE8s : Nat;
+    startHeight : ?Nat; // null while still waiting in the queue
+    startedAt : ?Time.Time;
+    reporters : [Principal];
+  };
+
+  public type Ad = {
+    id : Nat;
+    slot : Nat;
+    text : Text;
+    link : ?Text;
+    image : ?Blob; // always null once suspicious
+    imageHidden : Bool; // had an image, hidden because reported
+    advertiser : Principal;
+    blocks : Nat;
+    blocksLeft : Nat;
+    startHeight : ?Nat;
+    deadline : ?Time.Time; // hard stop even if the chain stalls
+    burnedE8s : Nat;
+    reports : Nat; // distinct logged-in painters who flagged it
+    suspicious : Bool; // reports >= the suspicious threshold: every frontend shows a warning
+  };
+
   public type AdSlot = {
     slot : Nat;
-    ad : ?Ad; // null = free (never rented, or the last ad expired)
+    current : ?Ad;
+    queue : [Ad]; // waiting, in the order they'll run
     reportedByMe : Bool; // the caller already flagged the running ad
   };
 
   public type AdMarket = {
     slots : [AdSlot];
-    pricePerDayE8s : Nat; // what a rental starting right now costs, per day
-    floorPricePerDayE8s : Nat;
-    maxDays : Nat;
+    pricePerBlockE8s : Nat; // what a rental paid right now costs, per block
+    floorPricePerBlockE8s : Nat;
+    minBlocks : Nat;
+    maxBlocks : Nat;
+    maxQueue : Nat; // waiting ads allowed per slot, on top of the running one
+    maxLifetimeDays : Nat;
     maxTextChars : Nat;
     maxLinkChars : Nat;
+    imageWidth : Nat;
+    imageHeight : Nat;
+    currentHeight : Nat;
+    heightUpdatedAt : Time.Time;
+    targetBlockSeconds : Nat;
     totalAdRentals : Nat;
     totalAdBurnedE8s : Nat;
     suspiciousAfterReports : Nat;
@@ -146,13 +176,14 @@ module {
     #Anonymous;
     #TooSoon : { retryAfterNanos : Nat };
     #InvalidSlot;
-    #SlotTaken : { expiresAt : Time.Time };
+    #QueueFull;
     #SlotBusy; // another rental of this same slot is mid-flight
     #InvalidText;
     #InvalidLink;
-    #InvalidDuration;
-    #ExtensionTooLong; // would put the ad more than maxDays past now
-    #PriceAboveMax : { pricePerDayE8s : Nat };
+    #InvalidImage;
+    #InvalidBlocks;
+    #HeightUnavailable; // couldn't read the current block height, nothing charged
+    #PriceAboveMax : { pricePerBlockE8s : Nat };
     #TransferFailed : TransferFromError;
   };
 
@@ -168,4 +199,10 @@ module {
   };
 
   public type ReportAdResult = { #Ok : { reports : Nat; suspicious : Bool }; #Err : ReportAdError };
+
+  /// The one call place makes to mother (PIKO's mining canister). Candid
+  /// lets the reply carry more fields than this; only height is read.
+  public type MotherActor = actor {
+    getStats : () -> async { height : Nat };
+  };
 }

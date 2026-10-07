@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://github.com/dfinity/icp-cli/raw/refs/tags/v1.3.0/docs/schemas/canister-yaml-schema.json
+
+# Local-only stand-in for PIKO's mining canister ("mother"), NOT the real
+# one. place reads the current block height from mother to run ads for a
+# number of blocks; this lets local tests set that height by hand.
+name: test-mother
+recipe:
+  type: "@dfinity/motoko@v5.1.0"

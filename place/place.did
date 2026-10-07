@@ -54,14 +54,15 @@ type RentAdResult =
 type RentAdError = 
  variant {
    Anonymous;
-   ExtensionTooLong;
-   InvalidDuration;
+   HeightUnavailable;
+   InvalidBlocks;
+   InvalidImage;
    InvalidLink;
    InvalidSlot;
    InvalidText;
-   PriceAboveMax: record {pricePerDayE8s: nat;};
+   PriceAboveMax: record {pricePerBlockE8s: nat;};
+   QueueFull;
    SlotBusy;
-   SlotTaken: record {expiresAt: Time;};
    TooSoon: record {retryAfterNanos: nat;};
    TransferFailed: TransferFromError;
  };
@@ -96,31 +97,45 @@ type Config =
  };
 type AdSlot = 
  record {
-   ad: opt Ad;
+   current: opt Ad;
+   queue: vec Ad;
    reportedByMe: bool;
    slot: nat;
  };
 type AdMarket = 
  record {
-   floorPricePerDayE8s: nat;
-   maxDays: nat;
+   currentHeight: nat;
+   floorPricePerBlockE8s: nat;
+   heightUpdatedAt: Time;
+   imageHeight: nat;
+   imageWidth: nat;
+   maxBlocks: nat;
+   maxLifetimeDays: nat;
    maxLinkChars: nat;
+   maxQueue: nat;
    maxTextChars: nat;
-   pricePerDayE8s: nat;
+   minBlocks: nat;
+   pricePerBlockE8s: nat;
    slots: vec AdSlot;
    suspiciousAfterReports: nat;
+   targetBlockSeconds: nat;
    totalAdBurnedE8s: nat;
    totalAdRentals: nat;
  };
 type Ad = 
  record {
    advertiser: principal;
+   blocks: nat;
+   blocksLeft: nat;
    burnedE8s: nat;
-   expiresAt: Time;
+   deadline: opt Time;
+   id: nat;
+   image: opt blob;
+   imageHidden: bool;
    link: opt text;
-   rentedAt: Time;
    reports: nat;
    slot: nat;
+   startHeight: opt nat;
    suspicious: bool;
    "text": text;
  };
@@ -132,13 +147,15 @@ service : {
   getRecentPlacements: () -> (vec RecentPlacement) query;
   getStats: () -> (Stats) query;
   getTopPainters: (limit: nat) -> (vec TopPainter) query;
+  lockMotherId: () -> ();
   lockPikoLedgerId: () -> ();
   placePixel: (x: nat, y: nat, color: nat8) -> (PlaceResult);
   pruneStalePlaceAttempts: () -> (nat);
-  rentAdSlot: (slot: nat, "text": text, link: opt text, days: nat,
-   maxPricePerDayE8s: nat) -> (RentAdResult);
+  rentAdSlot: (slot: nat, "text": text, link: opt text, image: opt blob,
+   blocks: nat, maxPricePerBlockE8s: nat) -> (RentAdResult);
   reportAd: (slot: nat) -> (ReportAdResult);
   resetCanvas: () -> ();
+  setMotherId: (id: principal) -> ();
   setPikoLedgerId: (id: principal, mintingAccount: principal) -> ();
   topUpPlaceFrontend: () -> (record {sent: nat;});
 }
