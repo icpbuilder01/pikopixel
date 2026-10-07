@@ -109,15 +109,14 @@ type AdMarket =
    heightUpdatedAt: Time;
    imageHeight: nat;
    imageWidth: nat;
-   lifetimeHoursPerBlock: nat;
    maxBlocks: nat;
    maxLinkChars: nat;
    maxQueue: nat;
    maxTextChars: nat;
    minBlocks: nat;
-   minLifetimeDays: nat;
    pricePerBlockE8s: nat;
    slots: vec AdSlot;
+   stallStopDays: nat;
    suspiciousAfterReports: nat;
    targetBlockSeconds: nat;
    totalAdBurnedE8s: nat;

@@ -238,8 +238,8 @@ actor self {
   // Ads are bought in PIKO *blocks*, not days (suggested by a community
   // member, 2026-10-07): when nobody mines, nobody is looking at the mining
   // apps either, so the ad simply stays up until enough blocks have gone
-  // by. A hard time cap, scaled to the blocks paid for, still ends it if
-  // the chain ever stops for good, so no slot can be held forever. Each slot runs one ad and
+  // by. A safety stop still ends it after AD_STALL_STOP_DAYS without any
+  // new block, so a dead chain can't hold a slot forever. Each slot runs one ad and
   // queues up to AD_MAX_QUEUE more, each starting where the previous ends.
   //
   // mother (PIKO's mining canister) lives on another subnet, so queries
@@ -270,11 +270,11 @@ actor self {
   transient let AD_MIN_BLOCKS : Nat = 1;
   transient let AD_MAX_BLOCKS : Nat = 288;
   transient let AD_MAX_QUEUE : Nat = 3;
-  // The hard stop scales with what was paid for: 30 days for a 1-block
-  // ad, plus 24h for every extra block -- so a paid ad isn't cut short
-  // just because mining was slow or stopped for a while.
-  transient let AD_LIFETIME_NANOS_PER_BLOCK : Nat = 24 * 3_600_000_000_000;
-  transient let AD_MIN_LIFETIME_DAYS : Nat = 30;
+  // Safety stop: an ad ends early only once no new PIKO block has been
+  // found for this long (counted from its own start if that's later), so
+  // slow mining never cuts a paid ad short -- only a chain that has
+  // really stopped does.
+  transient let AD_STALL_STOP_DAYS : Nat = 30;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
   transient let AD_IMAGE_WIDTH : Nat = 64;
@@ -307,6 +307,8 @@ actor self {
   var motherLocked : Bool = false;
   var lastKnownHeight : Nat = 0;
   var heightUpdatedAt : Time.Time = 0;
+  // When lastKnownHeight last went up (0 until the first reading).
+  var lastNewBlockSeenAt : Time.Time = 0;
 
   public shared ({ caller }) func setMotherId(id : Principal) : async () {
     requireController(caller);
@@ -371,13 +373,14 @@ actor self {
     true;
   };
 
-  func adLifetimeNanos(blocks : Nat) : Nat {
-    AD_MIN_LIFETIME_DAYS * DAY_NANOS + (if (blocks > 1) { blocks - 1 } else { 0 }) * AD_LIFETIME_NANOS_PER_BLOCK;
+  // When a running ad hits the safety stop if no new block shows up.
+  func stallDeadline(startedAt : Time.Time) : Time.Time {
+    Int.max(startedAt, lastNewBlockSeenAt) + AD_STALL_STOP_DAYS * DAY_NANOS;
   };
 
   func entryFinished(e : Types.AdEntry, height : Nat, now : Time.Time) : Bool {
     switch (e.startHeight, e.startedAt) {
-      case (?sh, ?st) { height >= sh + e.blocks or now >= st + adLifetimeNanos(e.blocks) };
+      case (?sh, ?st) { height >= sh + e.blocks or now >= stallDeadline(st) };
       case _ { false };
     };
   };
@@ -400,7 +403,7 @@ actor self {
         case null { e.blocks };
       };
       startHeight = e.startHeight;
-      deadline = switch (e.startedAt) { case (?st) { ?(st + adLifetimeNanos(e.blocks)) }; case null { null } };
+      deadline = switch (e.startedAt) { case (?st) { ?stallDeadline(st) }; case null { null } };
       burnedE8s = e.burnedE8s;
       reports = e.reporters.size();
       suspicious;
@@ -436,8 +439,10 @@ actor self {
     let Mother : Types.MotherActor = actor (Principal.toText(motherId));
     try {
       let stats = await Mother.getStats();
+      let now = Time.now();
+      if (stats.height > lastKnownHeight or lastNewBlockSeenAt == 0) { lastNewBlockSeenAt := now };
       lastKnownHeight := Nat.max(lastKnownHeight, stats.height);
-      heightUpdatedAt := Time.now();
+      heightUpdatedAt := now;
       true;
     } catch (_e) { false };
   };
@@ -469,8 +474,7 @@ actor self {
       minBlocks = AD_MIN_BLOCKS;
       maxBlocks = AD_MAX_BLOCKS;
       maxQueue = AD_MAX_QUEUE;
-      minLifetimeDays = AD_MIN_LIFETIME_DAYS;
-      lifetimeHoursPerBlock = AD_LIFETIME_NANOS_PER_BLOCK / 3_600_000_000_000;
+      stallStopDays = AD_STALL_STOP_DAYS;
       maxTextChars = AD_MAX_TEXT_CHARS;
       maxLinkChars = AD_MAX_LINK_CHARS;
       imageWidth = AD_IMAGE_WIDTH;

@@ -111,8 +111,8 @@ module {
 
   /// One paid ad, running or waiting in its slot's queue. It runs for
   /// `blocks` PIKO blocks from the height it actually started at (so it
-  /// stays up while nobody mines), capped by a hard time limit scaled to
-  /// `blocks` so a dead chain can't hold a slot forever.
+  /// stays up while nobody mines), with a safety stop after a long stretch
+  /// without any block so a dead chain can't hold a slot forever.
   public type AdEntry = {
     id : Nat;
     slot : Nat;
@@ -139,7 +139,7 @@ module {
     blocks : Nat;
     blocksLeft : Nat;
     startHeight : ?Nat;
-    deadline : ?Time.Time; // hard stop even if the chain stalls
+    deadline : ?Time.Time; // safety stop if no new block is found before then (moves with every block)
     burnedE8s : Nat;
     reports : Nat; // distinct logged-in painters who flagged it
     suspicious : Bool; // reports >= the suspicious threshold: every frontend shows a warning
@@ -159,8 +159,7 @@ module {
     minBlocks : Nat;
     maxBlocks : Nat;
     maxQueue : Nat; // waiting ads allowed per slot, on top of the running one
-    minLifetimeDays : Nat; // hard stop: minLifetimeDays + (blocks - 1) x lifetimeHoursPerBlock
-    lifetimeHoursPerBlock : Nat;
+    stallStopDays : Nat; // a running ad stops after this long with no new block
     maxTextChars : Nat;
     maxLinkChars : Nat;
     imageWidth : Nat;
