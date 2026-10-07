@@ -111,8 +111,8 @@ module {
 
   /// One paid ad, running or waiting in its slot's queue. It runs for
   /// `blocks` PIKO blocks from the height it actually started at (so it
-  /// stays up while nobody mines), capped by a hard time limit so a dead
-  /// chain can't hold a slot forever.
+  /// stays up while nobody mines), capped by a hard time limit scaled to
+  /// `blocks` so a dead chain can't hold a slot forever.
   public type AdEntry = {
     id : Nat;
     slot : Nat;
@@ -159,7 +159,8 @@ module {
     minBlocks : Nat;
     maxBlocks : Nat;
     maxQueue : Nat; // waiting ads allowed per slot, on top of the running one
-    maxLifetimeDays : Nat;
+    minLifetimeDays : Nat; // hard stop: max(minLifetimeDays, blocks x lifetimeHoursPerBlock)
+    lifetimeHoursPerBlock : Nat;
     maxTextChars : Nat;
     maxLinkChars : Nat;
     imageWidth : Nat;
