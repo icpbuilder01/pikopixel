@@ -260,18 +260,23 @@ actor self {
   transient let E8S : Nat = 100_000_000;
   transient let DAY_NANOS : Nat = 86_400_000_000_000;
   transient let AD_SLOT_COUNT : Nat = 3;
-  transient let AD_START_PRICE_PER_BLOCK_E8S : Nat = 1 * E8S; // ~288 PIKO/day at the 5-min target
-  transient let AD_FLOOR_PRICE_PER_BLOCK_E8S : Nat = 20_000_000; // 0.2 PIKO
+  // ~300 PIKO/day at the ~15 blocks/day PIKO actually averaged in late
+  // September 2026 (far below the 288/day of the 5-minute target); the
+  // daily decay below brings it down on its own if mining picks up.
+  transient let AD_START_PRICE_PER_BLOCK_E8S : Nat = 20 * E8S;
+  transient let AD_FLOOR_PRICE_PER_BLOCK_E8S : Nat = 3 * E8S;
   transient let AD_PRICE_STEP_UP_PCT : Nat = 120; // x1.2 after each rental
   transient let AD_PRICE_DECAY_PCT : Nat = 90; // x0.9 per full day without one
-  transient let AD_MIN_BLOCKS : Nat = 12; // ~1h at the 5-min target
-  transient let AD_MAX_BLOCKS : Nat = 2_016; // ~7 days at the 5-min target
+  transient let AD_MIN_BLOCKS : Nat = 1;
+  // Kept well under what AD_MAX_LIFETIME_DAYS covers at the slow block
+  // rates PIKO has really seen, so the hard cap rarely cuts a paid ad short.
+  transient let AD_MAX_BLOCKS : Nat = 288;
   transient let AD_MAX_QUEUE : Nat = 3;
-  transient let AD_MAX_LIFETIME_DAYS : Nat = 30;
+  transient let AD_MAX_LIFETIME_DAYS : Nat = 60;
   transient let AD_MAX_TEXT_CHARS : Nat = 80;
   transient let AD_MAX_LINK_CHARS : Nat = 100;
-  transient let AD_IMAGE_WIDTH : Nat = 32;
-  transient let AD_IMAGE_HEIGHT : Nat = 16;
+  transient let AD_IMAGE_WIDTH : Nat = 64;
+  transient let AD_IMAGE_HEIGHT : Nat = 32;
   transient let AD_SUSPICIOUS_REPORTS : Nat = 3;
   // Past this many, more reports change nothing visible -- caps storage.
   transient let AD_MAX_STORED_REPORTERS : Nat = 50;

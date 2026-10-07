@@ -118,7 +118,7 @@ module {
     slot : Nat;
     text : Text;
     link : ?Text;
-    image : ?Blob; // imageWidth x imageHeight palette indices, row by row
+    image : ?Blob; // imageWidth x imageHeight (64x32) palette indices, row by row
     advertiser : Principal;
     paidAt : Time.Time;
     blocks : Nat;
