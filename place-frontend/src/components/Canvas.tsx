@@ -117,7 +117,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
 
   if (!config) {
     return (
-      <section className="block place-panel">
+      <section className="block place-panel game-panel">
         <h2 className="spark">
           Canvas <span className="section-icon">&#127912;</span>
         </h2>
@@ -211,7 +211,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
   }
 
   return (
-    <section className="block place-panel">
+    <section className="block place-panel game-panel">
       <div className="miner-panel-head">
         <h2 className="spark">
           Canvas <span className="section-icon">&#127912;</span>

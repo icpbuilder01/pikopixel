@@ -8,6 +8,8 @@ import { Canvas } from "./components/Canvas";
 import { SponsoredBanner, Advertise } from "./components/Sponsored";
 import type { Stats, RecentPlacement, TopPainter } from "./bindings/place/place";
 import "./App.css";
+import "./theme.css";
+import { AppNav } from "./components/AppNav";
 
 const POLL_MS = 2000;
 const TOP_PAINTERS_LIMIT = 10;
@@ -128,53 +130,30 @@ function App() {
   }
 
   return (
-    <main className="page">
-      <header className="header">
-        <div className="brand">
-          <span className="section-icon" style={{ fontSize: "1.4rem" }}>
-            &#127912;
-          </span>
-          <div className="brand-text">
-            <span className="brand-name">PikoPixel</span>
-            <span className="brand-ticker">
-              {stats ? (
-                <>
-                  <span className="pulse-dot" /> {stats.totalPlacements.toString()} pixels placed, live
-                </>
-              ) : (
-                "A collaborative canvas · fully on-chain"
-              )}
+    <main className="page app-shell">
+      <AppNav current="pixel">
+        {identity ? (
+          <>
+            <span className="principal-pill">
+              {shortPrincipal(identity.getPrincipal().toText())}
+              {balance !== null ? ` · ${formatPiko(balance)} PIKO` : ""}
             </span>
-          </div>
-        </div>
-        <div className="wallet-box">
-          {identity ? (
-            <>
-              <span className="principal-pill">
-                {shortPrincipal(identity.getPrincipal().toText())}
-                {balance !== null ? ` · ${formatPiko(balance)} PIKO` : ""}
-              </span>
-              <button type="button" className="button secondary small" onClick={handleCopyPrincipal}>
-                {copied ? "Copied" : "Copy"}
-              </button>
-              <button
-                type="button"
-                className="button secondary small"
-                onClick={() => setShowSend((s) => !s)}
-              >
-                Send out
-              </button>
-              <button className="button secondary" onClick={handleLogout}>
-                Log out
-              </button>
-            </>
-          ) : (
-            <button className="button" onClick={handleLogin}>
-              Log in with Internet Identity
+            <button type="button" className="button secondary small" onClick={handleCopyPrincipal}>
+              {copied ? "Copied" : "Copy"}
             </button>
-          )}
-        </div>
-      </header>
+            <button type="button" className="button secondary small" onClick={() => setShowSend((s) => !s)}>
+              Send out
+            </button>
+            <button className="button secondary small" onClick={handleLogout}>
+              Log out
+            </button>
+          </>
+        ) : (
+          <button className="button" onClick={handleLogin}>
+            Log in
+          </button>
+        )}
+      </AppNav>
 
       {identity && showSend && (
         <form className="wallet-send-row" onSubmit={handleSend}>
@@ -198,160 +177,173 @@ function App() {
       )}
       {sendStatus && <p className="wallet-status">{sendStatus}</p>}
 
+      <div className="app-title">
+        <h1>
+          Paint a pixel. <em>Burn some PIKO.</em>
+        </h1>
+        <p className="app-sub">
+          {stats ? (
+            <>
+              <span className="pulse-dot" /> {stats.totalPlacements.toString()} pixels placed, live
+            </>
+          ) : (
+            "A collaborative canvas · fully on-chain"
+          )}
+          <span className="tag">Community canvas</span>
+          <span className="tag">PIKO burned, not bet</span>
+          <span className="tag spark">100% on-chain</span>
+        </p>
+      </div>
+
       <SponsoredBanner />
 
-      <div className="disclaimer">
+      <div className="disclaimer slim">
         <strong>This isn't a bet -- it's a burn.</strong> Every pixel permanently destroys a small
         amount of PIKO (sent straight to the ledger's minting account), same as any other ICRC-1 burn.
         There's no payout, no bankroll, and no way to get it back -- only place with what you're happy
         to see gone for good, as your contribution to a shared piece of art.
       </div>
 
-      <section className="hero">
-        <div className="tag-row">
-          <span className="tag">Community canvas</span>
-          <span className="tag">PIKO burned, not bet</span>
-          <span className="tag spark">100% on-chain</span>
+
+      <div className="app-grid">
+        <div className="app-main">
+          <Canvas identity={identity} onPlaced={handlePlaced} />
         </div>
-        <h1>Paint a pixel. &#127912; Burn some PIKO.</h1>
-        <p>
-          A companion to PIKO -- not a game, a shared canvas. Every placement is a tiny, permanent
-          deflationary event, visible to everyone in real time. Independent build, not affiliated with
-          r/place or any other canvas site.
-        </p>
-      </section>
-
-      <Canvas identity={identity} onPlaced={handlePlaced} />
-
-      <Advertise identity={identity} onRented={handlePlaced} />
-
-      <section className="block story-block">
-        <h2>
-          How it works <span className="section-icon">⚙️</span>
-        </h2>
-        <ul className="tech-list">
-          <li>
-            A shared {stats ? stats.gridSize.toString() : "100"}x{stats ? stats.gridSize.toString() : "100"} grid,
-            one canister, every pixel visible to every visitor -- refreshed live, no login needed just
-            to look.
-          </li>
-          <li>
-            Placing a pixel pulls a fixed amount of PIKO from your own balance (you approve it once)
-            and sends it directly to the PIKO ledger's own minting account -- a real ICRC-1 burn,
-            permanently removed from total supply.
-          </li>
-          <li>
-            <strong>This canister never holds the PIKO, even briefly.</strong> Unlike every game in
-            this family, there's no bankroll and no withdrawal path here, because there's nothing left
-            to withdraw once a pixel is placed -- it's gone, by design.
-          </li>
-          <li>No backend, no database, nothing off-chain -- same as the rest of PIKO.</li>
-        </ul>
-      </section>
-
-      <section className="block">
-        <h2 className="spark">
-          Stats <span className="section-icon">🔥</span>
-        </h2>
-        {stats ? (
-          <div className="stat-grid">
-            <div className="stat-tile">
-              <div className="stat-label">Pixels placed</div>
-              <div className="stat-value">{stats.totalPlacements.toString()}</div>
-            </div>
-            <div className="stat-tile">
-              <div className="stat-label token-label">
-                <span aria-hidden="true">🖌️</span>
-                Distinct painters
+        <aside className="app-side">
+          <section className="block">
+            <h2 className="spark">
+              Stats <span className="section-icon">🔥</span>
+            </h2>
+            {stats ? (
+              <div className="stat-grid">
+                <div className="stat-tile">
+                  <div className="stat-label">Pixels placed</div>
+                  <div className="stat-value">{stats.totalPlacements.toString()}</div>
+                </div>
+                <div className="stat-tile">
+                  <div className="stat-label token-label">
+                    <span aria-hidden="true">🖌️</span>
+                    Distinct painters
+                  </div>
+                  <div className="stat-value">{stats.distinctPainters.toString()}</div>
+                </div>
+                <div className="stat-tile stat-tile-wide">
+                  <div className="stat-label token-label">
+                    <span aria-hidden="true">🔥</span>
+                    <img src="/piko-logo.svg" alt="" className="token-icon" />
+                    PIKO burned, total
+                  </div>
+                  <div className="stat-value">{formatPiko(stats.totalBurnedPiko + stats.totalAdBurnedE8s)}</div>
+                  <div className="stat-breakdown mono">
+                    {formatPiko(stats.totalBurnedPiko)} by pixels · {formatPiko(stats.totalAdBurnedE8s)} by ads
+                  </div>
+                </div>
               </div>
-              <div className="stat-value">{stats.distinctPainters.toString()}</div>
+            ) : (
+              <div className="empty-state">Loading canvas stats...</div>
+            )}
+          </section>
+          <section className="block">
+            <div className="miner-panel-head">
+              <h2 className="spark">
+                Recent placements <span className="section-icon">&#127912;</span>
+              </h2>
+              {recent.length > 0 && (
+                <span className="live-pill">
+                  <span className="live-dot" /> live feed
+                </span>
+              )}
             </div>
-            <div className="stat-tile stat-tile-wide">
-              <div className="stat-label token-label">
-                <span aria-hidden="true">🔥</span>
-                <img src="/piko-logo.svg" alt="" className="token-icon" />
-                PIKO burned, total
+            {recent.length > 0 ? (
+              <div className="table-scroll">
+                <table className="blocks">
+                  <thead>
+                    <tr>
+                      <th>Painter</th>
+                      <th>Cell</th>
+                      <th>When</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recent.slice(0, 10).map((p, i) => (
+                      <tr key={i}>
+                        <td className="mono">{shortPrincipal(p.player.toText())}</td>
+                        <td>
+                          ({p.x.toString()}, {p.y.toString()})
+                        </td>
+                        <td>{timeAgo(p.timestamp)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="stat-value">{formatPiko(stats.totalBurnedPiko + stats.totalAdBurnedE8s)}</div>
-              <div className="stat-breakdown mono">
-                {formatPiko(stats.totalBurnedPiko)} by pixels · {formatPiko(stats.totalAdBurnedE8s)} by ads
+            ) : (
+              <div className="empty-state">No placements yet.</div>
+            )}
+          </section>
+          <section className="block">
+            <h2>
+              Top painters <span className="section-icon">🏆</span>
+            </h2>
+            <p className="section-intro">Ranked by total pixels placed, all-time.</p>
+            {painters.length > 0 ? (
+              <div className="table-scroll">
+                <table className="blocks">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Painter</th>
+                      <th>Pixels placed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {painters.map((entry, i) => (
+                      <tr key={entry.player.toText()}>
+                        <td className={i < 3 ? `rank-${i + 1}` : ""}>{i + 1}</td>
+                        <td className="mono">{shortPrincipal(entry.player.toText())}</td>
+                        <td>{entry.placements.toString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
-          </div>
-        ) : (
-          <div className="empty-state">Loading canvas stats...</div>
-        )}
-      </section>
+            ) : (
+              <div className="empty-state">No one's painted yet -- be the first.</div>
+            )}
+          </section>
+        </aside>
+      </div>
 
-      <section className="block">
-        <h2>
-          Top painters <span className="section-icon">🏆</span>
-        </h2>
-        <p className="section-intro">Ranked by total pixels placed, all-time.</p>
-        {painters.length > 0 ? (
-          <div className="table-scroll">
-            <table className="blocks">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Painter</th>
-                  <th>Pixels placed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {painters.map((entry, i) => (
-                  <tr key={entry.player.toText()}>
-                    <td className={i < 3 ? `rank-${i + 1}` : ""}>{i + 1}</td>
-                    <td className="mono">{shortPrincipal(entry.player.toText())}</td>
-                    <td>{entry.placements.toString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="empty-state">No one's painted yet -- be the first.</div>
-        )}
-      </section>
+      <div className="app-more">
+        <Advertise identity={identity} onRented={handlePlaced} />
+        <section className="block story-block">
+            <h2>
+              How it works <span className="section-icon">⚙️</span>
+            </h2>
+            <ul className="tech-list">
+              <li>
+                A shared {stats ? stats.gridSize.toString() : "100"}x{stats ? stats.gridSize.toString() : "100"} grid,
+                one canister, every pixel visible to every visitor -- refreshed live, no login needed just
+                to look.
+              </li>
+              <li>
+                Placing a pixel pulls a fixed amount of PIKO from your own balance (you approve it once)
+                and sends it directly to the PIKO ledger's own minting account -- a real ICRC-1 burn,
+                permanently removed from total supply.
+              </li>
+              <li>
+                <strong>This canister never holds the PIKO, even briefly.</strong> Unlike every game in
+                this family, there's no bankroll and no withdrawal path here, because there's nothing left
+                to withdraw once a pixel is placed -- it's gone, by design.
+              </li>
+              <li>No backend, no database, nothing off-chain -- same as the rest of PIKO.</li>
+            </ul>
+          </section>
+      </div>
 
-      <section className="block">
-        <div className="miner-panel-head">
-          <h2 className="spark">
-            Recent placements <span className="section-icon">&#127912;</span>
-          </h2>
-          {recent.length > 0 && (
-            <span className="live-pill">
-              <span className="live-dot" /> live feed
-            </span>
-          )}
-        </div>
-        {recent.length > 0 ? (
-          <div className="table-scroll">
-            <table className="blocks">
-              <thead>
-                <tr>
-                  <th>Painter</th>
-                  <th>Cell</th>
-                  <th>When</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recent.map((p, i) => (
-                  <tr key={i}>
-                    <td className="mono">{shortPrincipal(p.player.toText())}</td>
-                    <td>
-                      ({p.x.toString()}, {p.y.toString()})
-                    </td>
-                    <td>{timeAgo(p.timestamp)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="empty-state">No placements yet.</div>
-        )}
-      </section>
+
+
+
 
       <footer className="footer">
         <p>
