@@ -283,7 +283,7 @@ actor self {
   // Past this many, more reports change nothing visible -- caps storage.
   transient let AD_MAX_STORED_REPORTERS : Nat = 50;
   transient let TARGET_BLOCK_SECONDS : Nat = 300; // mother's own 5-minute target, display only
-  transient let HEIGHT_REFRESH_SECONDS : Nat = 60;
+  transient let HEIGHT_REFRESH_SECONDS : Nat = 600; // each poll costs ~43M cycles, and buying an ad refreshes the height itself
 
   // Dead since block-based queues replaced them (2026-10-08); kept only so
   // the stable signature stays compatible across that upgrade.
