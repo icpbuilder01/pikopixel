@@ -175,6 +175,14 @@ actor self {
   // deliberately no withdrawal path here because there is never anything
   // for a controller to withdraw.
   public shared ({ caller }) func placePixel(x : Nat, y : Nat, color : Nat8) : async Types.PlaceResult {
+    let now = Time.now();
+    switch (enterPaid(caller, now)) { case (?wait) { return #Err(#TooSoon({ retryAfterNanos = wait })) }; case null {} };
+    let result = await* placePixelBody(caller, x, y, color);
+    noteOutcome(caller, switch (result) { case (#Ok) { ?true }; case (#Err(#TooSoon(_))) { null }; case _ { ?false } }, Time.now());
+    result;
+  };
+
+  func placePixelBody(caller : Principal, x : Nat, y : Nat, color : Nat8) : async* Types.PlaceResult {
     if (Principal.isAnonymous(caller)) { return #Err(#Anonymous) };
 
     let now = Time.now();
@@ -504,14 +512,15 @@ actor self {
   // free, otherwise waits in its queue. `maxPricePerBlockE8s` protects the
   // caller from paying more than the price they were shown, since another
   // rental can raise it in between. Cost = price per block x blocks, burned.
-  public shared ({ caller }) func rentAdSlot(
-    slot : Nat,
-    text : Text,
-    link : ?Text,
-    image : ?Blob,
-    blocks : Nat,
-    maxPricePerBlockE8s : Nat,
-  ) : async Types.RentAdResult {
+  public shared ({ caller }) func rentAdSlot(slot : Nat, text : Text, link : ?Text, image : ?Blob, blocks : Nat, maxPricePerBlockE8s : Nat) : async Types.RentAdResult {
+    let now = Time.now();
+    switch (enterPaid(caller, now)) { case (?wait) { return #Err(#TooSoon({ retryAfterNanos = wait })) }; case null {} };
+    let result = await* rentAdSlotBody(caller, slot, text, link, image, blocks, maxPricePerBlockE8s);
+    noteOutcome(caller, switch (result) { case (#Ok(_)) { ?true }; case (#Err(#TooSoon(_))) { null }; case _ { ?false } }, Time.now());
+    result;
+  };
+
+  func rentAdSlotBody(caller : Principal, slot : Nat, text : Text, link : ?Text, image : ?Blob, blocks : Nat, maxPricePerBlockE8s : Nat) : async* Types.RentAdResult {
     if (Principal.isAnonymous(caller)) { return #Err(#Anonymous) };
 
     // Shares placePixel's cooldown map: same purpose (no free tight-loop
@@ -709,4 +718,139 @@ actor self {
 
   armSweepTimer<system>();
   armHeightTimer<system>();
+
+  // ---- Paid entry points: who gets in ----
+  //
+  // A paid call (bet, deal, pixel, ad, vault) costs this canister cycles even
+  // when the payment fails, and a new identity costs nothing to make. Known
+  // players (anyone who has already paid here) always get in, but after a few
+  // failures in a row each further failure makes them wait longer, up to an
+  // hour; one success clears it. Everyone else shares a small newcomer
+  // allowance that refills over time, so a flood of throwaway identities can
+  // only burn a bounded amount of cycles. All transient: an upgrade starts
+  // again from a full allowance and clean slates.
+  transient let NEWCOMER_BURST : Int = 30;
+  transient let NEWCOMER_REFILL_NANOS : Int = 120_000_000_000; // one more newcomer every 2 min
+  transient var newcomerCredit : Int = NEWCOMER_BURST * NEWCOMER_REFILL_NANOS;
+  transient var newcomerCreditAt : Int = 0;
+  transient let FREE_FAILURES : Nat = 3;
+  transient let FAILURE_BACKOFF_BASE_NANOS : Int = 10_000_000_000;
+  transient let FAILURE_BACKOFF_MAX_NANOS : Int = 3_600_000_000_000;
+  // Only known players get an entry here, so it stays as small as the player list.
+  transient let failureStreaks : Map.Map<Principal, (Nat, Int)> = Map.empty<Principal, (Nat, Int)>();
+
+  func isKnownPlayer(p : Principal) : Bool { switch (Map.get(painterPlacements, Principal.compare, p)) { case (?n) { n > 0 }; case null { false } } };
+
+  func newcomerCreditNow(now : Int) : Int {
+    Int.min(NEWCOMER_BURST * NEWCOMER_REFILL_NANOS, newcomerCredit + (now - newcomerCreditAt));
+  };
+
+  func takeNewcomerSlot(now : Int) : Bool {
+    let credit = newcomerCreditNow(now);
+    if (credit < NEWCOMER_REFILL_NANOS) { return false };
+    newcomerCredit := credit - NEWCOMER_REFILL_NANOS;
+    newcomerCreditAt := now;
+    true;
+  };
+
+  func blockedUntil(p : Principal) : Int {
+    switch (Map.get(failureStreaks, Principal.compare, p)) { case (?(_, until)) { until }; case null { 0 } };
+  };
+
+  // Ok resets the streak; a failure by a known player lengthens it; neutral
+  // outcomes (TooSoon) change nothing.
+  func noteOutcome(p : Principal, succeeded : ?Bool, now : Int) {
+    switch (succeeded) {
+      case (?true) { Map.remove(failureStreaks, Principal.compare, p) };
+      case (?false) {
+        if (isKnownPlayer(p)) {
+          let streak = switch (Map.get(failureStreaks, Principal.compare, p)) { case (?(k, _)) { k + 1 }; case null { 1 } };
+          let wait = if (streak <= FREE_FAILURES) { 0 } else {
+            Int.min(FAILURE_BACKOFF_MAX_NANOS, FAILURE_BACKOFF_BASE_NANOS * (2 ** Nat.min(20, streak - FREE_FAILURES - 1 : Nat)));
+          };
+          Map.add(failureStreaks, Principal.compare, p, (streak, now + wait));
+        };
+      };
+      case null {};
+    };
+  };
+
+  // Admission check shared by inspect (free refusal) and the method itself
+  // (for canister callers, which skip inspect). Returns the wait in
+  // nanoseconds when refused.
+  func paidRefusal(caller : Principal, now : Int) : ?Nat {
+    if (isKnownPlayer(caller)) {
+      let until = blockedUntil(caller);
+      if (until > now) { ?Int.abs(until - now) } else { null };
+    } else if (newcomerCreditNow(now) < NEWCOMER_REFILL_NANOS) {
+      ?Int.abs(NEWCOMER_REFILL_NANOS - newcomerCreditNow(now));
+    } else { null };
+  };
+
+  func admitPaid(caller : Principal, now : Int, lastAttempt : ?Int, interval : Int) : Bool {
+    if (Principal.isAnonymous(caller)) { return false };
+    if (isKnownPlayer(caller)) {
+      switch (lastAttempt) { case (?t) { if (now - t < interval) { return false } }; case null {} };
+    };
+    paidRefusal(caller, now) == null;
+  };
+
+  // In the method: refuse, or take a newcomer slot.
+  func enterPaid(caller : Principal, now : Int) : ?Nat {
+    if (Principal.isAnonymous(caller)) { return null }; // the method answers Anonymous itself
+    switch (paidRefusal(caller, now)) {
+      case (?wait) { ?wait };
+      case null {
+        if (not isKnownPlayer(caller)) { ignore takeNewcomerSlot(now) };
+        null;
+      };
+    };
+  };
+
+  // ---- Ingress filter (anti-spam) ----
+  //
+  // Runs before a user's call is accepted; a call refused here costs this
+  // canister no cycles. It is only an early "no": it runs on one node and
+  // canister callers skip it, so every method still does all of its own
+  // checks. Public methods are listed explicitly; anything else (admin
+  // methods, queries sent as paid update calls, timer-only maintenance) is
+  // left to controllers. Timers call their methods as self-calls, which never
+  // come through here.
+  system func inspect({
+    caller : Principal;
+    arg : Blob;
+    msg : {
+      #setPikoLedgerId : Any;
+      #lockPikoLedgerId : Any;
+      #getConfig : Any;
+      #getCanvas : Any;
+      #getStats : Any;
+      #getRecentPlacements : Any;
+      #getTopPainters : Any;
+      #resetCanvas : Any;
+      #placePixel : Any;
+      #setMotherId : Any;
+      #lockMotherId : Any;
+      #getAdMarket : Any;
+      #getActiveAds : Any;
+      #rentAdSlot : Any;
+      #reportAd : Any;
+      #topUpPlaceFrontend : Any;
+      #pruneStalePlaceAttempts : Any;
+    };
+  }) : Bool {
+    if (arg.size() > (switch msg { case (#rentAdSlot _) { 4096 }; case _ { 1024 } })) { return false };
+    let now = Time.now();
+    switch msg {
+      case (#placePixel _) { admitPaid(caller, now, Map.get(lastPlaceAttempt, Principal.compare, caller), MIN_PLACE_INTERVAL_NANOS) };
+      case (#rentAdSlot _) { admitPaid(caller, now, Map.get(lastPlaceAttempt, Principal.compare, caller), MIN_PLACE_INTERVAL_NANOS) };
+      case (#reportAd _) {
+        switch (Map.get(painterPlacements, Principal.compare, caller)) {
+          case (?n) { n > 0 };
+          case null { false };
+        };
+      };
+      case _ { Principal.isController(caller) };
+    };
+  };
 };
