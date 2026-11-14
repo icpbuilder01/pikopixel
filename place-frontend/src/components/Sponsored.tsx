@@ -3,7 +3,7 @@ import type { Identity } from "@icp-sdk/core/agent";
 import { Principal } from "@icp-sdk/core/principal";
 import { getPlaceActor, getLedgerActor } from "../lib/actors";
 import { placeCanisterId } from "../lib/canister-env";
-import { formatPiko, shortPrincipal } from "../lib/format";
+import { formatPiko, shortPrincipal, refusalText } from "../lib/format";
 import { PALETTE } from "../lib/palette";
 import { pixelateImageFile } from "../lib/pixelate";
 import { ReportAdError, type Ad, type AdMarket, type RentAdError } from "../bindings/place/place";
@@ -321,7 +321,7 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
       refresh();
     } catch (err) {
       console.error("reportAd failed", err);
-      setMessage({ kind: "critical", text: "Report failed -- try again." });
+      setMessage({ kind: "critical", text: refusalText(err) ?? "Report failed -- try again." });
     } finally {
       setBusy(false);
     }
@@ -376,7 +376,7 @@ export function Advertise({ identity, onRented }: AdvertiseProps) {
       }
     } catch (err) {
       console.error("rentAdSlot failed", err);
-      setMessage({ kind: "critical", text: "Rental failed, nothing was charged if this was a network error." });
+      setMessage({ kind: "critical", text: refusalText(err) ?? "Rental failed, nothing was charged if this was a network error." });
     } finally {
       setBusy(false);
     }

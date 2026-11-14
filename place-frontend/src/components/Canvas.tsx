@@ -3,7 +3,7 @@ import type { Identity } from "@icp-sdk/core/agent";
 import { Principal } from "@icp-sdk/core/principal";
 import { getPlaceActor, getLedgerActor } from "../lib/actors";
 import { placeCanisterId } from "../lib/canister-env";
-import { formatPiko } from "../lib/format";
+import { formatPiko, refusalText } from "../lib/format";
 import type { Config, PlaceError } from "../bindings/place/place";
 import { PALETTE } from "../lib/palette";
 
@@ -155,7 +155,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
       }
     } catch (err) {
       console.error("Place approval failed", err);
-      setMessage("Approval failed.");
+      setMessage(refusalText(err) ?? "Approval failed.");
     } finally {
       setApproving(false);
     }
@@ -204,7 +204,7 @@ export function Canvas({ identity, onPlaced }: CanvasProps) {
     } catch (err) {
       console.error("placePixel failed", err);
       if (previous !== null) paintLocal(cell.x, cell.y, previous);
-      setMessage("Placement failed, nothing was charged if this was a network error.");
+      setMessage(refusalText(err) ?? "Placement failed, nothing was charged if this was a network error.");
     } finally {
       setPendingCount((n) => n - 1);
     }
